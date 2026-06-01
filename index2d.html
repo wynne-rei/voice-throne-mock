@@ -1,0 +1,772 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VoiceThrone（仮）— Nordfels モック v0.1</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; background: #11161d; color: #e8eef5;
+    font-family: "Hiragino Kaku Gothic ProN", "Yu Gothic", system-ui, sans-serif; overflow: hidden; }
+  #wrap { position: relative; width: 100vw; height: 100vh; display: flex; align-items: center; justify-content: center; }
+  canvas { background: #1b2a1d; display: block; box-shadow: 0 0 40px #000a; border-radius: 6px; }
+
+  /* 上部HUD */
+  #hud { position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
+    display: flex; gap: 18px; align-items: center; padding: 8px 16px;
+    background: #0d1218cc; border: 1px solid #2a3a4a; border-radius: 10px; backdrop-filter: blur(4px); font-size: 14px; pointer-events: none; }
+  #hud .stat { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+  #hud .label { color: #8aa0b4; font-size: 11px; }
+  #hud .val { font-weight: 700; font-size: 16px; }
+  .gold { color: #ffd45e; } .castle { color: #7fd4ff; } .king { color: #ff9a6b; } .night { color: #d7b8ff; }
+
+  /* 下部 操作パネル */
+  #bottom { position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%);
+    display: flex; gap: 10px; align-items: center; }
+  .btn { background: #25405c; color: #eaf2fb; border: 1px solid #3d5e80; border-radius: 8px;
+    padding: 10px 16px; font-size: 14px; font-weight: 700; cursor: pointer; transition: .12s; }
+  .btn:hover { background: #305278; }
+  .btn:disabled { opacity: .4; cursor: default; }
+  .btn.primary { background: #2e7d4f; border-color: #46a96e; }
+  .btn.primary:hover { background: #379a60; }
+  .btn.danger { background: #6e2b2b; border-color: #9a4646; }
+
+  /* 建設メニュー */
+  #buildbar { display: none; gap: 8px; align-items: center; background: #0d1218e8;
+    border: 1px solid #2a3a4a; border-radius: 10px; padding: 8px 10px; }
+  #buildbar .title { font-size: 12px; color: #8aa0b4; margin-right: 4px; }
+  .bitem { background: #1c2733; border: 1px solid #34465a; border-radius: 7px; padding: 7px 11px; cursor: pointer; font-size: 13px; line-height: 1.3; text-align: left; }
+  .bitem:hover { background: #243140; }
+  .bitem .c { color: #ffd45e; font-weight: 700; }
+  .bitem.disabled { opacity: .4; cursor: default; }
+  .bitem small { display:block; color:#8aa0b4; font-size: 10px; }
+
+  /* オーバーレイ（タイトル/結果） */
+  #overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    background: #0a0e14e0; text-align: center; z-index: 10; }
+  #overlay.hidden { display: none; }
+  .card { background: #141c26; border: 1px solid #2c3e52; border-radius: 16px; padding: 34px 40px; max-width: 560px; }
+  .card h1 { font-size: 26px; margin-bottom: 6px; letter-spacing: .04em; }
+  .card .sub { color: #8aa0b4; font-size: 13px; margin-bottom: 18px; }
+  .card .keys { text-align: left; font-size: 13px; color: #c2d2e2; background: #0d141d; border-radius: 10px; padding: 14px 16px; margin: 14px 0; line-height: 1.9; }
+  .card .keys b { color: #ffd45e; }
+  .card h1.win { color: #7fe6a0; } .card h1.lose { color: #ff8a8a; }
+
+  #toast { position: absolute; top: 70px; left: 50%; transform: translateX(-50%);
+    background: #0d1218e8; border: 1px solid #3d5e80; border-radius: 8px; padding: 8px 16px;
+    font-size: 14px; opacity: 0; transition: opacity .25s; pointer-events: none; }
+  #hint { position: absolute; bottom: 70px; left: 50%; transform: translateX(-50%);
+    font-size: 12px; color: #6f8499; pointer-events: none; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="game" width="960" height="600"></canvas>
+
+  <div id="hud">
+    <div class="stat"><span class="label">夜</span><span class="val night" id="hudNight">—</span></div>
+    <div class="stat"><span class="label">ゴールド</span><span class="val gold" id="hudGold">0</span></div>
+    <div class="stat"><span class="label">城HP</span><span class="val castle" id="hudCastle">0</span></div>
+    <div class="stat"><span class="label">王HP</span><span class="val king" id="hudKing">0</span></div>
+    <div class="stat"><span class="label">残り敵</span><span class="val" id="hudEnemies">0</span></div>
+  </div>
+
+  <div id="toast"></div>
+  <div id="hint">移動: WASD / 短剣: Space ・ 昼はノードをクリックで建設</div>
+
+  <div id="bottom">
+    <div id="buildbar"></div>
+    <button class="btn primary" id="startNightBtn">夜を始める ▶</button>
+  </div>
+
+  <div id="overlay">
+    <div class="card" id="card">
+      <h1>VoiceThrone <span style="font-size:14px;color:#6f8499">（仮）</span></h1>
+      <div class="sub">Thronefall 2面目「Nordfels」フル忠実モック v0.1</div>
+      <div class="keys">
+        <div><b>WASD / 矢印</b> … キング（王）を移動</div>
+        <div><b>自動</b> … 近くの敵に弓を撃つ（パッシブ）</div>
+        <div><b>Space</b> … 短剣突き（長クールダウンの必殺）</div>
+        <div><b>昼フェーズ</b> … 光るノードをクリック → 家/弓櫓/壁を建設・強化</div>
+        <div><b>夜を始める ▶</b> … 5方向から敵が侵攻。城を守れ</div>
+        <div style="color:#8aa0b4;margin-top:6px">13夜を生き延びれば勝利。城HPが0で敗北。</div>
+      </div>
+      <button class="btn primary" id="startGameBtn" style="font-size:16px;padding:12px 28px">はじめる</button>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+/* =========================================================================
+   VoiceThrone モック v0.1 — Thronefall「Nordfels」フル忠実再現
+   単体で動く / 描画は手続き型ミニマル / 数値はモック用の仮置き（後調整前提）
+   ========================================================================= */
+
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+const W = canvas.width, H = canvas.height;
+const CX = W / 2, CY = H / 2;           // 城（守る対象）の中心
+
+// ---- グローバル状態 ----------------------------------------------------
+const STATE = { TITLE:'title', DAY:'day', NIGHT:'night', WIN:'win', LOSE:'lose' };
+let state = STATE.TITLE;
+let gold = 12;
+let nightIndex = 0;                       // 0=未開始。1..13
+const TOTAL_NIGHTS = 13;
+
+// ---- 城 ----------------------------------------------------------------
+const castle = { x: CX, y: CY, r: 34, hp: 1000, maxHp: 1000 };
+
+// ---- キング（プレイヤー） ----------------------------------------------
+const king = {
+  x: CX, y: CY + 70, r: 11, speed: 165,
+  hp: 100, maxHp: 100, downed: 0,
+  bowRange: 165, bowDmg: 5, bowCd: 0, bowInterval: 0.95,   // ゆったり
+  daggerCd: 0, daggerMax: 4.0, daggerDmg: 26, daggerRange: 46, flash: 0,
+};
+
+// ---- スポーン地点（5方向） --------------------------------------------
+// dir名: 北東NE / 東E / 南東SE / 南S / 西W。 飛行は W,S,NE のみ
+const SPAWNS = {
+  NE: { x: W - 90,  y: 80,      name:'北東' },
+  E:  { x: W - 40,  y: CY,      name:'東' },
+  SE: { x: W - 90,  y: H - 80,  name:'南東' },
+  S:  { x: CX,      y: H - 36,  name:'南' },
+  W:  { x: 40,      y: CY,      name:'西' },
+};
+const FLY_DIRS = ['W','S','NE'];
+const ALL_DIRS = ['NE','E','SE','S','W'];
+
+// ---- 建設ノード（3層） -------------------------------------------------
+// 外周・前面・内城の3リング。各ノードは家/弓櫓/壁を建てられる
+const nodes = [];
+function buildNodes() {
+  const rings = [
+    { r: 235, n: 9, off: 0.0 },   // 外周
+    { r: 150, n: 8, off: 0.39 },  // 前面
+    { r: 85,  n: 6, off: 0.0 },   // 内城
+  ];
+  let id = 0;
+  for (const ring of rings) {
+    for (let i = 0; i < ring.n; i++) {
+      const a = ring.off + (i / ring.n) * Math.PI * 2;
+      const x = CX + Math.cos(a) * ring.r;
+      const y = CY + Math.sin(a) * ring.r * 0.82; // 少し横長マップ
+      nodes.push({ id: id++, x, y, building: null });
+    }
+  }
+}
+
+// ---- 建物定義 ----------------------------------------------------------
+const BUILDINGS = {
+  house: { name:'家', cost:2, color:'#caa34a',
+    levels:[ { income:1 }, { income:2, upCost:2 } ] },
+  tower: { name:'弓櫓', cost:3, color:'#6fa9d8', r:13,
+    levels:[ { dmg:8,  range:130, interval:0.8, hp:100 },
+             { dmg:12, range:150, interval:0.62, hp:250, upCost:5 } ] },
+  wall:  { name:'壁', cost:3, color:'#9aa3ab', r:15,
+    levels:[ { hp:240 }, { hp:640, upCost:4 } ] },
+};
+
+// ---- 敵定義（7種・行動が全部違う） ------------------------------------
+// target: 'castle' | 'king'。 flying: 壁無視。 collide: 衝突して攻撃する構造物
+const ENEMIES = {
+  swordsman: { jp:'剣士',   color:'#d8675a', r:7,  hp:9,   speed:30, dmgCastle:4,  dmgStruct:6,  atkRange:16, atkInt:0.8, gold:1, target:'castle' },
+  archer:    { jp:'弓兵',   color:'#cf9b4e', r:7,  hp:14,  speed:26, dmgCastle:3,  dmgStruct:2,  atkRange:120,atkInt:1.0, gold:1, target:'castle', ranged:true },
+  ogre:      { jp:'オーガ', color:'#8e5fbf', r:14, hp:200, speed:22, dmgCastle:20, dmgStruct:24, atkRange:22, atkInt:1.0, gold:5, target:'castle' },
+  racer:     { jp:'レーサー',color:'#e0c84e',r:6,  hp:35,  speed:78, dmgCastle:18, dmgStruct:5,  atkRange:14, atkInt:0.5, gold:2, target:'castle', wallOnly:true },
+  wasp:      { jp:'ワスプ', color:'#5fd0c0', r:6,  hp:25,  speed:60, dmgCastle:6,  dmgStruct:6,  atkRange:60, atkInt:0.7, gold:2, target:'castle', flying:true, ranged:true },
+  hunterling:{ jp:'ハンターリング',color:'#ff5fa0',r:7,hp:30,speed:34,dmgCastle:8, dmgStruct:8,  atkRange:18, atkInt:0.8, gold:2, target:'king' },
+  catapult:  { jp:'カタパルト',color:'#b06b3a',r:13,hp:45, speed:16, dmgCastle:60, dmgStruct:150,atkRange:150,atkInt:2.2, gold:4, target:'castle', ranged:true, siege:true },
+};
+
+// ---- 13夜ウェーブ表（実物どおり） -------------------------------------
+const WAVES = [
+  [['swordsman',3]],
+  [['swordsman',8]],
+  [['swordsman',8],['hunterling',2]],
+  [['archer',24]],
+  [['racer',15]],
+  [['swordsman',20],['archer',20]],
+  [['wasp',15]],
+  [['swordsman',30],['hunterling',10],['racer',10]],
+  [['wasp',25],['ogre',5]],
+  [['swordsman',90],['ogre',3]],
+  [['archer',50],['racer',30]],
+  [['hunterling',5]],
+  [['swordsman',80],['racer',35],['wasp',30],['archer',30],['catapult',16],['ogre',7],['hunterling',5]],
+];
+
+// ---- ランタイム配列 ----------------------------------------------------
+let enemies = [];
+let projectiles = [];   // 弓矢・タワー弾
+let particles = [];
+let floaters = [];      // ダメージ数字
+let spawnQueue = [];    // 夜のスポーン予約 {t, type, dir}
+let nightTimer = 0;
+let selectedNode = null;
+
+// ---- 入力 --------------------------------------------------------------
+const keys = {};
+addEventListener('keydown', e => {
+  keys[e.key.toLowerCase()] = true;
+  if (e.key === ' ') { e.preventDefault(); tryDagger(); }
+});
+addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
+
+canvas.addEventListener('click', onCanvasClick);
+function onCanvasClick(e) {
+  if (state !== STATE.DAY) return;
+  const p = canvasPos(e);
+  // 最寄りノード
+  let best = null, bd = 26;
+  for (const n of nodes) {
+    const d = Math.hypot(n.x - p.x, n.y - p.y);
+    if (d < bd) { bd = d; best = n; }
+  }
+  selectedNode = best;
+  renderBuildBar();
+}
+function canvasPos(e) {
+  const r = canvas.getBoundingClientRect();
+  return { x: (e.clientX - r.left) * (W / r.width), y: (e.clientY - r.top) * (H / r.height) };
+}
+
+// =========================================================================
+//  建設まわり
+// =========================================================================
+function renderBuildBar() {
+  const bar = document.getElementById('buildbar');
+  if (state !== STATE.DAY || !selectedNode) { bar.style.display = 'none'; return; }
+  bar.style.display = 'flex';
+  const n = selectedNode;
+  let html = `<span class="title">ノード#${n.id}</span>`;
+  if (!n.building) {
+    for (const key of ['house','tower','wall']) {
+      const b = BUILDINGS[key];
+      const ok = gold >= b.cost;
+      html += `<div class="bitem ${ok?'':'disabled'}" data-build="${key}">${b.name} <span class="c">${b.cost}G</span><small>${descOf(key,0)}</small></div>`;
+    }
+  } else {
+    const b = BUILDINGS[n.building.type];
+    const lv = n.building.level;
+    html += `<span style="color:#8aa0b4;font-size:12px">${b.name} Lv${lv+1}</span>`;
+    const next = b.levels[lv+1];
+    if (next) {
+      const ok = gold >= next.upCost;
+      html += `<div class="bitem ${ok?'':'disabled'}" data-up="1">強化 <span class="c">${next.upCost}G</span><small>${descOf(n.building.type,lv+1)}</small></div>`;
+    } else {
+      html += `<span style="color:#5f7080;font-size:12px">最大強化</span>`;
+    }
+    html += `<div class="bitem" data-sell="1">撤去 <small>少し返金</small></div>`;
+  }
+  bar.innerHTML = html;
+  bar.querySelectorAll('[data-build]').forEach(el => el.onclick = () => doBuild(el.dataset.build));
+  bar.querySelectorAll('[data-up]').forEach(el => el.onclick = doUpgrade);
+  bar.querySelectorAll('[data-sell]').forEach(el => el.onclick = doSell);
+}
+function descOf(type, lv) {
+  const L = BUILDINGS[type].levels[lv];
+  if (type === 'house') return `毎朝 +${L.income}G`;
+  if (type === 'tower') return `攻撃${L.dmg}・射程${L.range} HP${L.hp}`;
+  if (type === 'wall')  return `HP${L.hp} の盾`;
+  return '';
+}
+function doBuild(type) {
+  const b = BUILDINGS[type];
+  if (gold < b.cost || selectedNode.building) return;
+  gold -= b.cost;
+  const L = b.levels[0];
+  selectedNode.building = { type, level:0, hp:(L.hp||0), maxHp:(L.hp||0), cd:0, x:selectedNode.x, y:selectedNode.y };
+  toast(`${b.name}を建設`); updateHud(); renderBuildBar();
+}
+function doUpgrade() {
+  const bd = selectedNode.building; const b = BUILDINGS[bd.type];
+  const next = b.levels[bd.level+1]; if (!next || gold < next.upCost) return;
+  gold -= next.upCost; bd.level++;
+  if (next.hp) { bd.maxHp = next.hp; bd.hp = next.hp; }
+  toast(`${b.name}を強化 Lv${bd.level+1}`); updateHud(); renderBuildBar();
+}
+function doSell() {
+  const b = BUILDINGS[selectedNode.building.type];
+  gold += Math.ceil(b.cost / 2);
+  selectedNode.building = null;
+  toast('撤去'); updateHud(); renderBuildBar();
+}
+
+// =========================================================================
+//  夜の進行
+// =========================================================================
+function startNight() {
+  if (state !== STATE.DAY) return;
+  nightIndex++;
+  state = STATE.NIGHT;
+  selectedNode = null; renderBuildBar();
+  document.getElementById('startNightBtn').style.display = 'none';
+  buildSpawnQueue(nightIndex);
+  nightTimer = 0;
+  toast(`夜 ${nightIndex} / ${TOTAL_NIGHTS} — 侵攻開始`);
+  updateHud();
+}
+function buildSpawnQueue(n) {
+  spawnQueue = [];
+  const wave = WAVES[n-1];
+  // 種類をまとめて配列化 → シャッフルして時間差スポーン
+  let list = [];
+  for (const [type, count] of wave) for (let i=0;i<count;i++) list.push(type);
+  list = shuffle(list);
+  const total = list.length;
+  const interval = clamp(7 / total, 0.18, 1.4); // 大群ほど速く湧く
+  let t = 0.6, di = 0;
+  for (const type of list) {
+    const def = ENEMIES[type];
+    const pool = def.flying ? FLY_DIRS : ALL_DIRS;
+    const dir = pool[di % pool.length]; di++;
+    spawnQueue.push({ t, type, dir });
+    t += interval;
+  }
+}
+function spawnEnemy(type, dir) {
+  const def = ENEMIES[type];
+  const s = SPAWNS[dir];
+  enemies.push({
+    type, def, x: s.x + rnd(-14,14), y: s.y + rnd(-14,14),
+    hp: def.hp, maxHp: def.hp, cd: 0, flash: 0,
+    target: def.target,
+  });
+}
+
+function nightCleared() {
+  // 収入精算
+  let income = 0;
+  for (const n of nodes) if (n.building && n.building.type === 'house')
+    income += BUILDINGS.house.levels[n.building.level].income;
+  gold += income;
+  // 壁などHP回復（昼の間に修復）
+  for (const n of nodes) if (n.building && n.building.maxHp) n.building.hp = n.building.maxHp;
+  king.hp = king.maxHp; king.downed = 0;
+
+  if (nightIndex >= TOTAL_NIGHTS) { win(); return; }
+  state = STATE.DAY;
+  document.getElementById('startNightBtn').style.display = '';
+  toast(`夜明け — 収入 +${income}G（次は夜 ${nightIndex+1}）`);
+  updateHud();
+}
+
+// =========================================================================
+//  攻撃処理
+// =========================================================================
+function tryDagger() {
+  if (state !== STATE.NIGHT || king.downed > 0 || king.daggerCd > 0) return;
+  king.daggerCd = king.daggerMax;
+  king.flash = 0.18;
+  let hit = 0;
+  for (const e of enemies) {
+    if (Math.hypot(e.x-king.x, e.y-king.y) <= king.daggerRange + e.def.r) {
+      damageEnemy(e, king.daggerDmg, true); hit++;
+    }
+  }
+  for (let i=0;i<10;i++) particles.push(mkParticle(king.x, king.y, '#fff'));
+  if (!hit) toast('短剣（空振り）');
+}
+function damageEnemy(e, dmg, crit) {
+  e.hp -= dmg; e.flash = 0.12;
+  floaters.push({ x:e.x, y:e.y-8, t:0.7, txt:Math.round(dmg), crit });
+}
+function damageCastle(dmg) {
+  castle.hp -= dmg;
+  if (castle.hp <= 0) { castle.hp = 0; lose(); }
+}
+function damageKing(dmg) {
+  if (king.downed > 0) return;
+  king.hp -= dmg; king.flash = 0.15;
+  if (king.hp <= 0) { king.hp = 0; king.downed = 3.0; toast('王がダウン！城へ復帰中'); }
+}
+
+// =========================================================================
+//  メイン更新
+// =========================================================================
+let last = 0;
+function loop(ts) {
+  const dt = Math.min(0.05, (ts - last) / 1000 || 0); last = ts;
+  if (state === STATE.NIGHT || state === STATE.DAY) update(dt);
+  render();
+  requestAnimationFrame(loop);
+}
+
+function update(dt) {
+  updateKing(dt);
+  if (state === STATE.NIGHT) {
+    // スポーン
+    nightTimer += dt;
+    while (spawnQueue.length && spawnQueue[0].t <= nightTimer) {
+      const s = spawnQueue.shift(); spawnEnemy(s.type, s.dir);
+    }
+    updateEnemies(dt);
+    updateTowers(dt);
+    // 夜クリア判定
+    if (!spawnQueue.length && enemies.length === 0) nightCleared();
+  }
+  updateProjectiles(dt);
+  updateFx(dt);
+  updateHud();
+}
+
+function updateKing(dt) {
+  if (king.downed > 0) {
+    king.downed -= dt;
+    // 城へ吸い寄せ
+    king.x += (castle.x - king.x) * Math.min(1, dt*4);
+    king.y += (castle.y + 50 - king.y) * Math.min(1, dt*4);
+    if (king.downed <= 0) { king.hp = king.maxHp; }
+  } else {
+    let dx = 0, dy = 0;
+    if (keys['a'] || keys['arrowleft']) dx -= 1;
+    if (keys['d'] || keys['arrowright']) dx += 1;
+    if (keys['w'] || keys['arrowup']) dy -= 1;
+    if (keys['s'] || keys['arrowdown']) dy += 1;
+    const len = Math.hypot(dx, dy);
+    if (len > 0) { king.x += (dx/len)*king.speed*dt; king.y += (dy/len)*king.speed*dt; }
+    king.x = clamp(king.x, 12, W-12); king.y = clamp(king.y, 12, H-12);
+  }
+  king.flash = Math.max(0, king.flash - dt);
+  if (king.daggerCd > 0) king.daggerCd -= dt;
+  // 昼はHP回復
+  if (state === STATE.DAY && king.hp < king.maxHp) king.hp = Math.min(king.maxHp, king.hp + 30*dt);
+
+  // 自動弓（夜のみ）
+  if (state === STATE.NIGHT && king.downed <= 0) {
+    king.bowCd -= dt;
+    if (king.bowCd <= 0) {
+      const tgt = nearestEnemy(king.x, king.y, king.bowRange);
+      if (tgt) { fireArrow(king.x, king.y, tgt, king.bowDmg, '#ffe28a'); king.bowCd = king.bowInterval; }
+    }
+  }
+}
+
+function updateEnemies(dt) {
+  for (const e of enemies) {
+    e.flash = Math.max(0, e.flash - dt);
+    if (e.cd > 0) e.cd -= dt;
+    const def = e.def;
+
+    // ターゲット座標
+    let tx, ty;
+    if (e.target === 'king') { tx = king.x; ty = king.y; }
+    else { tx = castle.x; ty = castle.y; }
+
+    // 衝突する構造物（壁/建物/城）を探す
+    let blocker = null, bdist = 1e9;
+    if (!def.flying) {
+      for (const n of nodes) {
+        const b = n.building; if (!b) continue;
+        if (def.wallOnly && b.type !== 'wall') continue;       // レーサーは壁だけ気にする
+        if (!b.maxHp) continue;                                  // 家は当たり判定なし扱い
+        const d = Math.hypot(b.x - e.x, b.y - e.y);
+        const reach = def.r + (BUILDINGS[b.type].r||14) + def.atkRange*0.4;
+        if (d < reach && d < bdist) { bdist = d; blocker = b; }
+      }
+    }
+    // 城への到達
+    const dCastle = Math.hypot(castle.x - e.x, castle.y - e.y);
+    const castleReach = def.r + castle.r + (def.ranged ? def.atkRange : 6);
+
+    // 王への到達（ハンターリング）
+    let kingReach = false;
+    if (e.target === 'king' && king.downed <= 0) {
+      if (Math.hypot(king.x - e.x, king.y - e.y) <= def.r + king.r + def.atkRange*0.5) kingReach = true;
+    }
+
+    // --- 攻撃 or 前進 ---
+    if (kingReach) {
+      if (e.cd <= 0) { damageKing(def.dmgCastle); e.cd = def.atkInt; }
+    } else if (e.target !== 'king' && dCastle <= castleReach) {
+      if (e.cd <= 0) { damageCastle(def.dmgCastle); e.cd = def.atkInt; e.flash=0.1; }
+    } else if (blocker && bdist <= def.r + (BUILDINGS[blocker.type].r||14) + (def.ranged?def.atkRange:8)) {
+      // 構造物を攻撃
+      if (e.cd <= 0) {
+        blocker.hp -= def.dmgStruct; e.cd = def.atkInt;
+        if (blocker.hp <= 0) removeBuilding(blocker);
+      }
+    } else {
+      // 前進（ターゲットへ。途中に壁があれば少し回り込む）
+      let ax = tx - e.x, ay = ty - e.y; const al = Math.hypot(ax,ay)||1;
+      ax/=al; ay/=al;
+      if (blocker) { // 壁回避: 接線方向を少し混ぜる
+        const wx = blocker.x - e.x, wy = blocker.y - e.y;
+        ax += -wy*0.012; ay += wx*0.012;
+        const l2 = Math.hypot(ax,ay)||1; ax/=l2; ay/=l2;
+      }
+      e.x += ax * def.speed * dt; e.y += ay * def.speed * dt;
+    }
+  }
+  // 死亡処理
+  enemies = enemies.filter(e => {
+    if (e.hp <= 0) {
+      gold += e.def.gold;
+      for (let i=0;i<6;i++) particles.push(mkParticle(e.x,e.y,e.def.color));
+      floaters.push({ x:e.x, y:e.y, t:0.6, txt:'+'+e.def.gold, gold:true });
+      return false;
+    }
+    return true;
+  });
+}
+
+function removeBuilding(b) {
+  for (const n of nodes) if (n.building === b) {
+    n.building = null;
+    for (let i=0;i<10;i++) particles.push(mkParticle(b.x,b.y,'#aaa'));
+    if (selectedNode === n) renderBuildBar();
+  }
+}
+
+function updateTowers(dt) {
+  for (const n of nodes) {
+    const b = n.building; if (!b || b.type !== 'tower') continue;
+    const L = BUILDINGS.tower.levels[b.level];
+    b.cd -= dt;
+    if (b.cd <= 0) {
+      const tgt = nearestEnemy(b.x, b.y, L.range);
+      if (tgt) { fireArrow(b.x, b.y, tgt, L.dmg, '#9fd0ff'); b.cd = L.interval; }
+    }
+  }
+}
+
+function fireArrow(x, y, target, dmg, color) {
+  projectiles.push({ x, y, target, dmg, color, speed: 420, dead:false });
+}
+function updateProjectiles(dt) {
+  for (const p of projectiles) {
+    if (!p.target || p.target.hp <= 0) { p.dead = true; continue; }
+    const dx = p.target.x - p.x, dy = p.target.y - p.y, d = Math.hypot(dx,dy);
+    if (d < 10) { damageEnemy(p.target, p.dmg, false); p.dead = true;
+      particles.push(mkParticle(p.x,p.y,p.color)); }
+    else { p.x += dx/d*p.speed*dt; p.y += dy/d*p.speed*dt; }
+  }
+  projectiles = projectiles.filter(p => !p.dead);
+}
+
+// ---- FX ----------------------------------------------------------------
+function mkParticle(x,y,color){ return { x,y, vx:rnd(-60,60), vy:rnd(-60,60), t:0.5, color }; }
+function updateFx(dt) {
+  for (const p of particles){ p.x+=p.vx*dt; p.y+=p.vy*dt; p.t-=dt; }
+  particles = particles.filter(p=>p.t>0);
+  for (const f of floaters){ f.y-=22*dt; f.t-=dt; }
+  floaters = floaters.filter(f=>f.t>0);
+}
+
+// =========================================================================
+//  描画
+// =========================================================================
+function render() {
+  // 背景（昼夜で色変化）
+  const day = (state===STATE.DAY||state===STATE.TITLE);
+  ctx.fillStyle = day ? '#243a26' : '#16241c';
+  ctx.fillRect(0,0,W,H);
+  drawGround();
+
+  // スポーン地点
+  for (const k of ALL_DIRS) drawSpawn(SPAWNS[k], state===STATE.NIGHT);
+
+  // ノード/建物
+  for (const n of nodes) drawNode(n, day);
+
+  // 城
+  drawCastle();
+
+  // 矢
+  for (const p of projectiles) { ctx.strokeStyle=p.color; ctx.lineWidth=2;
+    const a=Math.atan2(p.target? p.target.y-p.y:0, p.target? p.target.x-p.x:1);
+    ctx.beginPath(); ctx.moveTo(p.x,p.y); ctx.lineTo(p.x-Math.cos(a)*8,p.y-Math.sin(a)*8); ctx.stroke(); }
+
+  // 敵
+  for (const e of enemies) drawEnemy(e);
+
+  // 王
+  drawKing();
+
+  // パーティクル/数字
+  for (const p of particles){ ctx.globalAlpha=Math.max(0,p.t*2); ctx.fillStyle=p.color;
+    ctx.fillRect(p.x-2,p.y-2,4,4); } ctx.globalAlpha=1;
+  for (const f of floaters){ ctx.globalAlpha=Math.max(0,Math.min(1,f.t*2));
+    ctx.fillStyle = f.gold ? '#ffd45e' : (f.crit?'#fff':'#ffd0c0');
+    ctx.font = (f.crit?'bold 16px':'13px')+' sans-serif'; ctx.textAlign='center';
+    ctx.fillText(f.txt, f.x, f.y); } ctx.globalAlpha=1; ctx.textAlign='left';
+
+  // 夜のビネット
+  if (state===STATE.NIGHT) { const g=ctx.createRadialGradient(CX,CY,200,CX,CY,520);
+    g.addColorStop(0,'#0000'); g.addColorStop(1,'#0008'); ctx.fillStyle=g; ctx.fillRect(0,0,W,H); }
+}
+
+function drawGround() {
+  // 川（U字）と山の簡易表現
+  ctx.strokeStyle = '#2f4a7a55'; ctx.lineWidth = 26;
+  ctx.beginPath(); ctx.moveTo(70,40); ctx.lineTo(70,H-40);
+  ctx.quadraticCurveTo(70,H-12, 200,H-12); ctx.lineTo(W-200,H-12);
+  ctx.quadraticCurveTo(W-70,H-12, W-70,H-40); ctx.lineTo(W-70,40); ctx.stroke();
+  // 北の山
+  ctx.fillStyle = '#33402f';
+  for (let i=0;i<6;i++){ const x=160+i*120; ctx.beginPath();
+    ctx.moveTo(x-50,46); ctx.lineTo(x,8); ctx.lineTo(x+50,46); ctx.closePath(); ctx.fill(); }
+}
+
+function drawSpawn(s, active) {
+  ctx.save(); ctx.translate(s.x, s.y);
+  ctx.strokeStyle = active ? '#ff6b6b' : '#ff6b6b66'; ctx.lineWidth=2;
+  ctx.beginPath(); ctx.arc(0,0,13,0,7); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(-6,-6); ctx.lineTo(6,6); ctx.moveTo(6,-6); ctx.lineTo(-6,6); ctx.stroke();
+  ctx.fillStyle = '#ff9a9a'; ctx.font='10px sans-serif'; ctx.textAlign='center';
+  ctx.fillText(s.name, 0, 26); ctx.restore(); ctx.textAlign='left';
+}
+
+function drawNode(n, day) {
+  const b = n.building;
+  if (!b) {
+    if (day) { ctx.strokeStyle = (selectedNode===n)?'#ffd45e':'#ffffff44';
+      ctx.lineWidth=(selectedNode===n)?3:1.5; ctx.setLineDash([4,4]);
+      ctx.beginPath(); ctx.arc(n.x,n.y,11,0,7); ctx.stroke(); ctx.setLineDash([]); }
+    return;
+  }
+  const def = BUILDINGS[b.type];
+  if (b.type==='house') {
+    ctx.fillStyle = def.color; ctx.fillRect(n.x-9,n.y-7,18,14);
+    ctx.fillStyle='#3a2e16'; ctx.beginPath(); ctx.moveTo(n.x-11,n.y-7); ctx.lineTo(n.x,n.y-15); ctx.lineTo(n.x+11,n.y-7); ctx.fill();
+  } else if (b.type==='tower') {
+    if (state===STATE.NIGHT){ const L=BUILDINGS.tower.levels[b.level];
+      ctx.strokeStyle='#6fa9d822'; ctx.beginPath(); ctx.arc(n.x,n.y,L.range,0,7); ctx.stroke(); }
+    ctx.fillStyle=def.color; ctx.beginPath(); ctx.arc(n.x,n.y,def.r,0,7); ctx.fill();
+    ctx.fillStyle='#1b3247'; ctx.beginPath(); ctx.arc(n.x,n.y,5,0,7); ctx.fill();
+  } else if (b.type==='wall') {
+    ctx.fillStyle=def.color; ctx.fillRect(n.x-def.r,n.y-9,def.r*2,18);
+    ctx.fillStyle='#00000033'; for(let i=-1;i<2;i++) ctx.fillRect(n.x+i*8-2,n.y-9,3,18);
+  }
+  if (b.flash) { ctx.fillStyle='#fff8'; ctx.fillRect(n.x-14,n.y-14,28,28); }
+  // 建物HPバー
+  if (b.maxHp && b.hp < b.maxHp) drawBar(n.x, n.y-18, 22, b.hp/b.maxHp, '#7fd47f');
+  // Lvドット
+  ctx.fillStyle='#ffffffcc'; for(let i=0;i<=b.level;i++) ctx.fillRect(n.x-6+i*6, n.y+def.r-2 || n.y+10, 4,4);
+}
+
+function drawCastle() {
+  ctx.save(); ctx.translate(castle.x, castle.y);
+  // 城本体
+  ctx.fillStyle = '#c9cdd4'; ctx.beginPath(); ctx.arc(0,0,castle.r,0,7); ctx.fill();
+  ctx.fillStyle = '#9aa0aa';
+  for (let i=0;i<8;i++){ const a=i/8*Math.PI*2; ctx.fillRect(Math.cos(a)*castle.r-4, Math.sin(a)*castle.r-4, 8,8); }
+  ctx.fillStyle = '#7fd4ff'; ctx.beginPath(); ctx.arc(0,0,12,0,7); ctx.fill();
+  // 旗
+  ctx.strokeStyle='#eee'; ctx.beginPath(); ctx.moveTo(0,-castle.r); ctx.lineTo(0,-castle.r-16); ctx.stroke();
+  ctx.fillStyle='#d7b8ff'; ctx.beginPath(); ctx.moveTo(0,-castle.r-16); ctx.lineTo(12,-castle.r-12); ctx.lineTo(0,-castle.r-8); ctx.fill();
+  ctx.restore();
+  drawBar(castle.x, castle.y - castle.r - 24, 60, castle.hp/castle.maxHp, '#7fd4ff', true);
+}
+
+function drawEnemy(e) {
+  const def = e.def;
+  ctx.save(); ctx.translate(e.x, e.y);
+  if (def.flying) { // 影
+    ctx.fillStyle='#0004'; ctx.beginPath(); ctx.ellipse(0,8,def.r,def.r*0.4,0,0,7); ctx.fill();
+    ctx.translate(0,-6);
+  }
+  ctx.fillStyle = e.flash>0 ? '#fff' : def.color;
+  ctx.beginPath(); ctx.arc(0,0,def.r,0,7); ctx.fill();
+  // 種類ごとの目印
+  ctx.fillStyle = '#0006';
+  if (e.type==='racer'){ ctx.fillRect(-def.r,-1.5,def.r*2,3); }          // 突進ライン
+  else if (e.type==='wasp'){ ctx.fillRect(-def.r-3,-1,6,2); ctx.fillRect(def.r-3,-1,6,2); } // 羽
+  else if (e.type==='hunterling'){ ctx.beginPath(); ctx.arc(0,0,3,0,7); ctx.fill(); } // 目
+  else if (e.type==='ogre'||e.type==='catapult'){ ctx.fillRect(-def.r,-def.r,def.r*2,3); }
+  ctx.restore();
+  if (e.hp < e.maxHp) drawBar(e.x, e.y-def.r-7, def.r*2+2, e.hp/e.maxHp, '#e07a7a');
+}
+
+function drawKing() {
+  ctx.save(); ctx.translate(king.x, king.y);
+  if (king.downed>0) ctx.globalAlpha = 0.4 + 0.3*Math.sin(king.downed*20);
+  // ダガー範囲フラッシュ
+  if (king.flash>0){ ctx.strokeStyle='#ffffffcc'; ctx.lineWidth=2;
+    ctx.beginPath(); ctx.arc(0,0,king.daggerRange,0,7); ctx.stroke(); }
+  ctx.fillStyle = king.flash>0?'#fff':'#ff9a6b';
+  ctx.beginPath(); ctx.arc(0,0,king.r,0,7); ctx.fill();
+  ctx.fillStyle='#fff'; ctx.beginPath(); ctx.moveTo(0,-king.r-7); ctx.lineTo(5,-king.r); ctx.lineTo(-5,-king.r); ctx.fill(); // 王冠
+  ctx.restore(); ctx.globalAlpha=1;
+  if (state===STATE.NIGHT && king.downed<=0)
+    drawBar(king.x, king.y-king.r-8, 24, king.hp/king.maxHp, '#ffb38a');
+  // ダガーCDリング
+  if (state===STATE.NIGHT && king.daggerCd>0){ ctx.strokeStyle='#ffffff55'; ctx.lineWidth=2;
+    ctx.beginPath(); ctx.arc(king.x,king.y,king.r+5, -Math.PI/2, -Math.PI/2 + (1-king.daggerCd/king.daggerMax)*7); ctx.stroke(); }
+}
+
+function drawBar(x, y, w, ratio, color, big) {
+  const h = big?5:3; ratio = clamp(ratio,0,1);
+  ctx.fillStyle='#000a'; ctx.fillRect(x-w/2-1, y-1, w+2, h+2);
+  ctx.fillStyle=color; ctx.fillRect(x-w/2, y, w*ratio, h);
+}
+
+// =========================================================================
+//  HUD / オーバーレイ
+// =========================================================================
+function updateHud() {
+  document.getElementById('hudNight').textContent = nightIndex ? `${nightIndex}/${TOTAL_NIGHTS}` : `0/${TOTAL_NIGHTS}`;
+  document.getElementById('hudGold').textContent = Math.floor(gold);
+  document.getElementById('hudCastle').textContent = Math.ceil(castle.hp);
+  document.getElementById('hudKing').textContent = Math.ceil(king.hp);
+  document.getElementById('hudEnemies').textContent = state===STATE.NIGHT ? (enemies.length + spawnQueue.length) : '—';
+}
+let toastT;
+function toast(msg) {
+  const el = document.getElementById('toast'); el.textContent = msg; el.style.opacity = 1;
+  clearTimeout(toastT); toastT = setTimeout(()=> el.style.opacity = 0, 1800);
+}
+function showOverlay(html) {
+  const ov = document.getElementById('overlay'); ov.classList.remove('hidden');
+  document.getElementById('card').innerHTML = html;
+}
+function hideOverlay(){ document.getElementById('overlay').classList.add('hidden'); }
+
+function win() {
+  state = STATE.WIN;
+  showOverlay(`<h1 class="win">勝利！ 13夜を生き延びた</h1>
+    <div class="sub">Nordfels 制圧。土台ループはここまで動きます。</div>
+    <button class="btn primary" onclick="location.reload()" style="font-size:16px;padding:12px 28px">もう一度</button>`);
+}
+function lose() {
+  state = STATE.LOSE;
+  showOverlay(`<h1 class="lose">敗北… 城が陥落</h1>
+    <div class="sub">夜 ${nightIndex} / ${TOTAL_NIGHTS} で力尽きた。</div>
+    <button class="btn primary" onclick="location.reload()" style="font-size:16px;padding:12px 28px">もう一度</button>`);
+}
+
+// =========================================================================
+//  ユーティリティ
+// =========================================================================
+function nearestEnemy(x,y,range){ let best=null,bd=range; for(const e of enemies){
+  const d=Math.hypot(e.x-x,e.y-y); if(d<bd){bd=d;best=e;} } return best; }
+function clamp(v,a,b){ return v<a?a:v>b?b:v; }
+function rnd(a,b){ return a + Math.random()*(b-a); }
+function shuffle(arr){ for(let i=arr.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1));
+  [arr[i],arr[j]]=[arr[j],arr[i]]; } return arr; }
+
+// =========================================================================
+//  起動
+// =========================================================================
+function startGame() {
+  hideOverlay();
+  state = STATE.DAY;
+  nightIndex = 0; gold = 12;
+  castle.hp = castle.maxHp; king.hp = king.maxHp;
+  king.x = CX; king.y = CY + 70;
+  enemies=[]; projectiles=[]; particles=[]; floaters=[]; spawnQueue=[];
+  document.getElementById('startNightBtn').style.display = '';
+  toast('昼フェーズ — ノードをクリックして守りを固めよう');
+  updateHud();
+}
+buildNodes();
+document.getElementById('startGameBtn').onclick = startGame;
+document.getElementById('startNightBtn').onclick = startNight;
+updateHud();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

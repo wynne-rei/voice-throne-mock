@@ -322,7 +322,7 @@ const castleGroup=new THREE.Group(); castleGroup.position.set(toWX(castle.x),0,t
     c.position.set(Math.cos(a)*3.4,2.3,Math.sin(a)*3.4); castleGroup.add(c); }
   const pole=mk(new THREE.CylinderGeometry(0.07,0.07,2.2,5),0xdddddd,{outline:false}); pole.position.set(0,5.1,0); castleGroup.add(pole);
   const flag=mk(new THREE.BoxGeometry(1.3,0.8,0.08),0x2e6fd6); flag.position.set(0.72,5.4,0); castleGroup.add(flag);
-  groundBlob(castleGroup,4.3); })();
+  castleGroup.userData.flag=flag; groundBlob(castleGroup,4.3); })();
 
 // ===== キング =====
 const kingGroup=new THREE.Group(); scene.add(kingGroup);
@@ -514,7 +514,7 @@ function sellWall(){ const w=selectedWall; if(!w||!w.built) return; gold+=Math.c
 // ===== 味方ユニット（兵舎） =====
 function spawnSquad(bd){ const def=UNITS[bd.unit]; const count=def.count+BUILDINGS.barracks.levels[bd.level].extra; bd.units=[];
   for(let i=0;i<count;i++){ const a=i/count*Math.PI*2; const hx=bd.x+Math.cos(a)*30, hy=bd.y+Math.sin(a)*26;
-    const u={ kind:bd.unit, def, x:hx, y:hy, homeX:hx, homeY:hy, hp:def.hp, maxHp:def.hp, cd:0, flash:0, dir:0, mesh:makeFriendlyMesh(bd.unit), barracks:bd };
+    const u={ kind:bd.unit, def, x:hx, y:hy, homeX:hx, homeY:hy, hp:def.hp, maxHp:def.hp, cd:0, flash:0, dir:0, mesh:makeFriendlyMesh(bd.unit), barracks:bd, bobOff:Math.random()*6.28, moving:false, atkAnim:0, spawnT:0.22 };
     friendlies.push(u); bd.units.push(u); }
 }
 function clearSquad(bd){ if(!bd.units) return; for(const u of bd.units){ if(u.mesh){ scene.remove(u.mesh); disposeObject(u.mesh); } u.dead=true; }
@@ -533,7 +533,7 @@ function buildSpawnQueue(n){ spawnQueue=[]; const wave=WAVES[n-1]; let list=[];
   list=shuffle(list); const interval=clamp(7/list.length,0.18,1.4); let t=0.6, di=0;
   for(const type of list){ const pool=ENEMIES[type].flying?FLY_DIRS:ALL_DIRS; spawnQueue.push({t,type,dir:pool[di%pool.length]}); di++; t+=interval; } }
 function spawnEnemy(type,dir){ const def=ENEMIES[type], s=SPAWNS[dir];
-  enemies.push({ type,def, x:s.x+rnd(-14,14), y:s.y+rnd(-14,14), hp:def.hp, maxHp:def.hp, cd:0, flash:0, target:def.target, mesh:makeEnemyMesh(type) }); }
+  enemies.push({ type,def, x:s.x+rnd(-14,14), y:s.y+rnd(-14,14), hp:def.hp, maxHp:def.hp, cd:0, flash:0, target:def.target, mesh:makeEnemyMesh(type), bobOff:Math.random()*6.28, moving:false, atkAnim:0, spawnT:0.22 }); }
 function nightCleared(){ let income=0;
   for(const n of nodes){ const b=n.building; if(b&&(b.type==='house'||b.type==='mill')) income+=BUILDINGS[b.type].levels[b.level].income; }
   gold+=income;
@@ -569,9 +569,9 @@ function update(dt){ updateKing(dt);
   updateProjectiles(dt); updateParticles(dt); updateHud(); updateWarnIcons(); }
 
 function updateKing(dt){
-  if(king.downed>0){ king.downed-=dt; king.x+=(castle.x-king.x)*Math.min(1,dt*4); king.y+=((castle.y+60)-king.y)*Math.min(1,dt*4); if(king.downed<=0) king.hp=king.maxHp; }
+  if(king.downed>0){ king.moving=false; king.downed-=dt; king.x+=(castle.x-king.x)*Math.min(1,dt*4); king.y+=((castle.y+60)-king.y)*Math.min(1,dt*4); if(king.downed<=0) king.hp=king.maxHp; }
   else { let dx=0,dy=0; if(keys['a']||keys['arrowleft'])dx-=1; if(keys['d']||keys['arrowright'])dx+=1; if(keys['w']||keys['arrowup'])dy-=1; if(keys['s']||keys['arrowdown'])dy+=1;
-    const len=Math.hypot(dx,dy); if(len>0){ king.x+=(dx/len)*king.speed*dt; king.y+=(dy/len)*king.speed*dt; king.dir=Math.atan2(dx,-dy); }
+    const len=Math.hypot(dx,dy); king.moving=len>0; if(len>0){ king.x+=(dx/len)*king.speed*dt; king.y+=(dy/len)*king.speed*dt; king.dir=Math.atan2(dx,-dy); }
     king.x=clamp(king.x,30,930); king.y=clamp(king.y,30,564); }
   king.flash=Math.max(0,king.flash-dt); if(king.daggerCd>0) king.daggerCd-=dt;
   if(state===STATE.DAY && king.hp<king.maxHp) king.hp=Math.min(king.maxHp,king.hp+30*dt);
@@ -582,7 +582,7 @@ function nearestStructure(e){ const def=e.def; let blocker=null,bdist=1e9;
   if(!def.wallOnly) for(const n of nodes){ const b=n.building; if(!b||!b.maxHp) continue; const d=Math.hypot(b.x-e.x,b.y-e.y); const reach=def.r+b.r+def.atkRange*0.4; if(d<reach&&d<bdist){bdist=d;blocker=b;} }
   return {blocker,bdist}; }
 function updateEnemies(dt){
-  for(const e of enemies){ e.flash=Math.max(0,e.flash-dt); if(e.cd>0) e.cd-=dt; const def=e.def;
+  for(const e of enemies){ e.flash=Math.max(0,e.flash-dt); if(e.cd>0) e.cd-=dt; if(e.atkAnim>0)e.atkAnim-=dt; if(e.spawnT>0)e.spawnT-=dt; e.moving=false; const def=e.def;
     let tx,ty; if(e.target==='king'){tx=king.x;ty=king.y;} else {tx=castle.x;ty=castle.y;}
     // 味方との交戦（レーサーと王狙いは無視して直進）
     let foe=null,fod=1e9; if(!def.wallOnly && e.target!=='king'){ for(const u of friendlies){ const d=Math.hypot(u.x-e.x,u.y-e.y); if(d<fod){fod=d;foe=u;} } }
@@ -590,11 +590,12 @@ function updateEnemies(dt){
     const {blocker,bdist}=def.flying?{blocker:null,bdist:1e9}:nearestStructure(e);
     const dCastle=Math.hypot(castle.x-e.x,castle.y-e.y), castleReach=def.r+castle.r+(def.ranged?def.atkRange:6);
     let kingReach=(e.target==='king'&&king.downed<=0&&Math.hypot(king.x-e.x,king.y-e.y)<=def.r+king.r+def.atkRange*0.5);
-    if(foe && fod<=foeReach){ if(e.cd<=0){ damageFriendly(foe,def.dmgStruct); e.cd=def.atkInt; e.flash=0.08; } }
-    else if(kingReach){ if(e.cd<=0){ damageKing(def.dmgCastle); e.cd=def.atkInt; } }
-    else if(e.target!=='king'&&dCastle<=castleReach){ if(e.cd<=0){ damageCastle(def.dmgCastle); e.cd=def.atkInt; e.flash=0.1; } }
-    else if(blocker&&bdist<=def.r+blocker.r+(def.ranged?def.atkRange:8)){ if(e.cd<=0){ blocker.hp-=def.dmgStruct; e.cd=def.atkInt; if(blocker.hp<=0) removeStructure(blocker); } }
+    if(foe && fod<=foeReach){ if(e.mesh) e.mesh.rotation.y=Math.atan2(foe.x-e.x,foe.y-e.y); if(e.cd<=0){ damageFriendly(foe,def.dmgStruct); e.cd=def.atkInt; e.atkAnim=0.22; e.flash=0.08; } }
+    else if(kingReach){ if(e.mesh) e.mesh.rotation.y=Math.atan2(king.x-e.x,king.y-e.y); if(e.cd<=0){ damageKing(def.dmgCastle); e.cd=def.atkInt; e.atkAnim=0.22; } }
+    else if(e.target!=='king'&&dCastle<=castleReach){ if(e.mesh) e.mesh.rotation.y=Math.atan2(castle.x-e.x,castle.y-e.y); if(e.cd<=0){ damageCastle(def.dmgCastle); e.cd=def.atkInt; e.atkAnim=0.22; e.flash=0.1; } }
+    else if(blocker&&bdist<=def.r+blocker.r+(def.ranged?def.atkRange:8)){ if(e.mesh) e.mesh.rotation.y=Math.atan2(blocker.x-e.x,blocker.y-e.y); if(e.cd<=0){ blocker.hp-=def.dmgStruct; e.cd=def.atkInt; e.atkAnim=0.22; if(blocker.hp<=0) removeStructure(blocker); } }
     else { // 前進。近い味方が居れば寄る（交戦のため）
+      e.moving=true;
       let gx=tx, gy=ty; if(foe && fod<150 && !def.wallOnly){ gx=foe.x; gy=foe.y; }
       let ax=gx-e.x, ay=gy-e.y; const al=Math.hypot(ax,ay)||1; ax/=al; ay/=al;
       if(blocker){ const wx=blocker.x-e.x, wy=blocker.y-e.y; ax+=-wy*0.012; ay+=wx*0.012; const l2=Math.hypot(ax,ay)||1; ax/=l2; ay/=l2; }
@@ -603,12 +604,12 @@ function updateEnemies(dt){
   enemies=enemies.filter(e=>{ if(e.hp<=0){ gold+=e.def.gold; if(e.mesh){ spawnHitFx(e.mesh.position.x,0.6,e.mesh.position.z,ENEMY_COLOR[e.type]||ENEMY_COLOR.base); scene.remove(e.mesh); disposeObject(e.mesh); } return false; } return true; });
 }
 function updateFriendlies(dt){
-  for(const u of friendlies){ u.flash=Math.max(0,u.flash-dt); if(u.cd>0) u.cd-=dt; const def=u.def;
+  for(const u of friendlies){ u.flash=Math.max(0,u.flash-dt); if(u.cd>0) u.cd-=dt; if(u.atkAnim>0)u.atkAnim-=dt; if(u.spawnT>0)u.spawnT-=dt; u.moving=false; const def=u.def;
     const aggro=def.ranged?def.range:150; const tgt=nearestEnemy(u.x,u.y,aggro);
-    if(tgt){ const d=Math.hypot(tgt.x-u.x,tgt.y-u.y);
-      if(d<=def.range){ if(u.cd<=0){ if(def.ranged) fireArrow(u.x,u.y,tgt,def.dmg,0x9fe0ff); else damageEnemy(tgt,def.dmg); u.cd=def.atkInt; } }
-      else { const ax=(tgt.x-u.x)/d, ay=(tgt.y-u.y)/d; u.x+=ax*def.speed*dt; u.y+=ay*def.speed*dt; u.dir=Math.atan2(ax,ay); } }
-    else { const dx=u.homeX-u.x, dy=u.homeY-u.y, d=Math.hypot(dx,dy); if(d>6){ u.x+=dx/d*def.speed*dt; u.y+=dy/d*def.speed*dt; u.dir=Math.atan2(dx/d,dy/d); } }
+    if(tgt){ const d=Math.hypot(tgt.x-u.x,tgt.y-u.y); u.dir=Math.atan2(tgt.x-u.x,tgt.y-u.y);
+      if(d<=def.range){ if(u.cd<=0){ if(def.ranged) fireArrow(u.x,u.y,tgt,def.dmg,0x9fe0ff); else damageEnemy(tgt,def.dmg); u.cd=def.atkInt; u.atkAnim=0.2; } }
+      else { const ax=(tgt.x-u.x)/d, ay=(tgt.y-u.y)/d; u.x+=ax*def.speed*dt; u.y+=ay*def.speed*dt; u.moving=true; } }
+    else { const dx=u.homeX-u.x, dy=u.homeY-u.y, d=Math.hypot(dx,dy); if(d>6){ u.x+=dx/d*def.speed*dt; u.y+=dy/d*def.speed*dt; u.dir=Math.atan2(dx/d,dy/d); u.moving=true; } }
   }
   friendlies=friendlies.filter(u=>{ if(u.hp<=0){ if(u.mesh){ spawnHitFx(toWX(u.x),0.6,toWZ(u.y),u.def.color); scene.remove(u.mesh); disposeObject(u.mesh); } return false; } return true; });
 }
@@ -628,18 +629,34 @@ function updateParticles(dt){ for(const p of particles){ const u=p.userData; u.t
 // =========================================================================
 //  シーン同期・カメラ・昼夜
 // =========================================================================
+function setEmissive(m,val){ const b=m.userData.body; if(b) b.traverse(o=>{ if(o.material&&o.material.emissive&&o.material!==OUTLINE_MAT) o.material.emissiveIntensity=val; }); }
 function syncScene(){
-  kingGroup.position.set(toWX(king.x),0,toWZ(king.y)); kingGroup.rotation.y=king.dir;
+  // 王（移動でギャロップのバウンド）
+  const kb=king.moving?Math.abs(Math.sin(gameTime*13))*0.16:0;
+  kingGroup.position.set(toWX(king.x),kb,toWZ(king.y)); kingGroup.rotation.y=king.dir;
   kingGroup.visible=(state===STATE.NIGHT||state===STATE.DAY);
   daggerRing.material.opacity=king.flash>0?0.8:0;
-  for(const e of enemies){ if(!e.mesh) continue; e.mesh.position.set(toWX(e.x), e.def.flying?3.5:0, toWZ(e.y));
-    const b=e.mesh.userData.body; if(b) b.traverse(o=>{ if(o.material&&o.material.emissive&&o.material!==OUTLINE_MAT) o.material.emissiveIntensity=e.flash>0?0.9:(nightT*0.35); }); }
-  for(const u of friendlies){ if(!u.mesh) continue; u.mesh.position.set(toWX(u.x),0,toWZ(u.y)); u.mesh.rotation.y=u.dir;
-    const b=u.mesh.userData.body; if(b) b.traverse(o=>{ if(o.material&&o.material.emissive&&o.material!==OUTLINE_MAT) o.material.emissiveIntensity=u.flash>0?0.9:(nightT*0.3); }); }
-  // ミルの羽を回す
-  for(const n of nodes){ const b=n.building; if(b&&b.type==='mill'&&b.mesh&&b.mesh.userData.sails) b.mesh.userData.sails.rotation.z+=0.02; }
+  // 敵：歩きバウンド／攻撃の突き／出現ポップ／ヒット伸縮
+  for(const e of enemies){ const m=e.mesh; if(!m) continue; const wx=toWX(e.x), wz=toWZ(e.y); let baseY,bob;
+    if(e.def.flying){ baseY=3.4+Math.sin(gameTime*3+e.bobOff)*0.3; bob=0; }
+    else { baseY=0; bob=e.moving?Math.abs(Math.sin(gameTime*11+e.bobOff))*0.16:Math.sin(gameTime*2.5+e.bobOff)*0.04; }
+    let lunge=0; if(e.atkAnim>0){ const p=1-e.atkAnim/0.22; lunge=Math.sin(p*Math.PI)*0.55; }
+    const fa=m.rotation.y; m.position.set(wx+Math.sin(fa)*lunge, baseY+bob, wz+Math.cos(fa)*lunge);
+    let sc=1; if(e.spawnT>0) sc=1-(e.spawnT/0.22)*0.65; if(e.flash>0) sc*=1+e.flash*1.1; m.scale.setScalar(sc);
+    setEmissive(m, e.flash>0?0.9:(nightT*0.35)); }
+  // 味方
+  for(const u of friendlies){ const m=u.mesh; if(!m) continue; const wx=toWX(u.x), wz=toWZ(u.y);
+    const bob=u.moving?Math.abs(Math.sin(gameTime*12+u.bobOff))*0.15:Math.sin(gameTime*2.5+u.bobOff)*0.04;
+    let lunge=0; if(u.atkAnim>0){ const p=1-u.atkAnim/0.2; lunge=Math.sin(p*Math.PI)*0.5; }
+    m.rotation.y=u.dir; const fa=u.dir; m.position.set(wx+Math.sin(fa)*lunge, bob, wz+Math.cos(fa)*lunge);
+    let sc=1; if(u.spawnT>0) sc=1-(u.spawnT/0.22)*0.65; if(u.flash>0) sc*=1+u.flash*1.1; m.scale.setScalar(sc);
+    setEmissive(m, u.flash>0?0.9:(nightT*0.3)); }
+  // ミルの羽／城の旗／水のゆらぎ
+  for(const n of nodes){ const b=n.building; if(b&&b.type==='mill'&&b.mesh&&b.mesh.userData.sails) b.mesh.userData.sails.rotation.z+=0.03; }
+  if(castleGroup.userData.flag) castleGroup.userData.flag.rotation.y=Math.sin(gameTime*4)*0.35;
+  water.position.y=-0.6+Math.sin(gameTime*0.7)*0.06;
 }
-let nightT=0, nightTarget=0; function setDayNight(v){ nightTarget=v; }
+let nightT=0, nightTarget=0, gameTime=0; function setDayNight(v){ nightTarget=v; }
 const DAY={ sun:new THREE.Color(0xfff0d6), sunI:1.7, amb:0.7, rimI:0.45, skyTop:new THREE.Color(0x5aa6dc), skyBot:new THREE.Color(0xe2f1f7), fogN:82, fogF:205, bloom:0.30 };
 const NGT={ sun:new THREE.Color(0x42548a), sunI:0.30, amb:0.30, rimI:0.18, skyTop:new THREE.Color(0x0c1430), skyBot:new THREE.Color(0x26365a), fogN:40, fogF:135, bloom:1.05 };
 const _c=new THREE.Color();
@@ -704,7 +721,7 @@ function startGame(){ hideOverlay(); state=STATE.DAY; nightIndex=0; gold=14;
   toast('昼フェーズ — 光るスポットをクリックして守りを固めよう'); updateHud(); }
 
 let last=0;
-function loop(ts){ const dt=Math.min(0.05,(ts-last)/1000||0); last=ts;
+function loop(ts){ const dt=Math.min(0.05,(ts-last)/1000||0); last=ts; gameTime+=dt;
   nightT+=(nightTarget-nightT)*Math.min(1,dt*2.2); applyDayNight();
   if(state===STATE.NIGHT||state===STATE.DAY) update(dt);
   syncScene(); updateCamera(); composer.render(); requestAnimationFrame(loop); }
@@ -722,7 +739,7 @@ window.dbg={ get state(){return state;}, set state(v){state=v;}, startGame, star
   doBuild, buildBarracks, doUpgrade, doSell, buildWall, upgradeWall, sellWall, spawnEnemy, setDayNight, scene, camera, renderer,
   get selectedNode(){return selectedNode;}, set selectedNode(v){selectedNode=v;}, get selectedWall(){return selectedWall;}, set selectedWall(v){selectedWall=v;}, select,
   viz:{ sun, rim, ambient, GradePass, skyU, DAY, NGT, get exposure(){return renderer.toneMappingExposure;}, set exposure(v){renderer.toneMappingExposure=v;} },
-  tick:(dt=0.033,n=1)=>{ for(let i=0;i<n;i++){ nightT+=(nightTarget-nightT)*Math.min(1,dt*2.2); applyDayNight(); update(dt); } syncScene(); } };
+  tick:(dt=0.033,n=1)=>{ for(let i=0;i<n;i++){ gameTime+=dt; nightT+=(nightTarget-nightT)*Math.min(1,dt*2.2); applyDayNight(); update(dt); } syncScene(); } };
 </script>
 </body>
 </html>

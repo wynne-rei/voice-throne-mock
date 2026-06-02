@@ -1,0 +1,782 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VoiceThrone（仮）— Nordfels 3Dモック v0.2</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; background: #0c1014; color: #e8eef5;
+    font-family: "Hiragino Kaku Gothic ProN", "Yu Gothic", system-ui, sans-serif; overflow: hidden; }
+  #wrap { position: relative; width: 100vw; height: 100vh; }
+  #three { position: absolute; inset: 0; z-index: 0; }
+
+  #hud { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); z-index: 5;
+    display: flex; gap: 18px; align-items: center; padding: 8px 16px;
+    background: #0d1218cc; border: 1px solid #2a3a4a; border-radius: 10px; backdrop-filter: blur(4px); font-size: 14px; pointer-events: none; }
+  #hud .stat { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+  #hud .label { color: #8aa0b4; font-size: 11px; }
+  #hud .val { font-weight: 700; font-size: 16px; }
+  .gold { color: #ffd45e; } .castle { color: #7fd4ff; } .king { color: #ff9a6b; } .night { color: #d7b8ff; }
+
+  #bottom { position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%); z-index: 5;
+    display: flex; gap: 10px; align-items: center; }
+  .btn { background: #25405c; color: #eaf2fb; border: 1px solid #3d5e80; border-radius: 8px;
+    padding: 10px 16px; font-size: 14px; font-weight: 700; cursor: pointer; transition: .12s; }
+  .btn:hover { background: #305278; }
+  .btn:disabled { opacity: .4; cursor: default; }
+  .btn.primary { background: #2e7d4f; border-color: #46a96e; }
+  .btn.primary:hover { background: #379a60; }
+
+  #buildbar { display: none; gap: 8px; align-items: center; background: #0d1218e8;
+    border: 1px solid #2a3a4a; border-radius: 10px; padding: 8px 10px; }
+  #buildbar .title { font-size: 12px; color: #8aa0b4; margin-right: 4px; }
+  .bitem { background: #1c2733; border: 1px solid #34465a; border-radius: 7px; padding: 7px 11px; cursor: pointer; font-size: 13px; line-height: 1.3; text-align: left; }
+  .bitem:hover { background: #243140; }
+  .bitem .c { color: #ffd45e; font-weight: 700; }
+  .bitem.disabled { opacity: .4; cursor: default; }
+  .bitem small { display:block; color:#8aa0b4; font-size: 10px; }
+
+  #overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    background: #0a0e14e0; text-align: center; z-index: 10; }
+  #overlay.hidden { display: none; }
+  .card { background: #141c26; border: 1px solid #2c3e52; border-radius: 16px; padding: 34px 40px; max-width: 560px; }
+  .card h1 { font-size: 26px; margin-bottom: 6px; letter-spacing: .04em; }
+  .card .sub { color: #8aa0b4; font-size: 13px; margin-bottom: 18px; }
+  .card .keys { text-align: left; font-size: 13px; color: #c2d2e2; background: #0d141d; border-radius: 10px; padding: 14px 16px; margin: 14px 0; line-height: 1.9; }
+  .card .keys b { color: #ffd45e; }
+  .card h1.win { color: #7fe6a0; } .card h1.lose { color: #ff8a8a; }
+
+  #toast { position: absolute; top: 70px; left: 50%; transform: translateX(-50%); z-index: 5;
+    background: #0d1218e8; border: 1px solid #3d5e80; border-radius: 8px; padding: 8px 16px;
+    font-size: 14px; opacity: 0; transition: opacity .25s; pointer-events: none; }
+  #hint { position: absolute; bottom: 70px; left: 50%; transform: translateX(-50%); z-index: 5;
+    font-size: 12px; color: #6f8499; pointer-events: none; }
+  /* 画面端の襲来方向アイコン */
+  .warn { position: absolute; z-index: 4; width: 26px; height: 26px; border-radius: 50%;
+    border: 2px solid #ff5a5a; color: #ff8a8a; display: flex; align-items: center; justify-content: center;
+    font-size: 12px; background: #2a0e0e88; pointer-events: none; opacity: 0; transition: opacity .3s; }
+  #loading { position:absolute; inset:0; z-index:20; display:flex; align-items:center; justify-content:center;
+    background:#0c1014; color:#8aa0b4; font-size:14px; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="three"></div>
+
+  <div id="hud">
+    <div class="stat"><span class="label">夜</span><span class="val night" id="hudNight">—</span></div>
+    <div class="stat"><span class="label">ゴールド</span><span class="val gold" id="hudGold">0</span></div>
+    <div class="stat"><span class="label">城HP</span><span class="val castle" id="hudCastle">0</span></div>
+    <div class="stat"><span class="label">王HP</span><span class="val king" id="hudKing">0</span></div>
+    <div class="stat"><span class="label">残り敵</span><span class="val" id="hudEnemies">0</span></div>
+  </div>
+
+  <div id="toast"></div>
+  <div id="hint">移動: WASD / 短剣: Space ・ 昼はノードをクリックで建設</div>
+
+  <div id="bottom">
+    <div id="buildbar"></div>
+    <button class="btn primary" id="startNightBtn">夜を始める ▶</button>
+  </div>
+
+  <div id="overlay">
+    <div class="card" id="card">
+      <h1>VoiceThrone <span style="font-size:14px;color:#6f8499">（仮）</span></h1>
+      <div class="sub">Thronefall 2面目「Nordfels」3Dモック v0.2 — クォータービュー</div>
+      <div class="keys">
+        <div><b>WASD / 矢印</b> … キング（王）を移動（カメラが追従）</div>
+        <div><b>自動</b> … 近くの敵に弓を撃つ（パッシブ）</div>
+        <div><b>Space</b> … 短剣突き（長クールダウンの必殺）</div>
+        <div><b>昼フェーズ</b> … 光るノードをクリック → 家/弓櫓/壁を建設・強化</div>
+        <div><b>夜を始める ▶</b> … 5方向から敵（赤）が侵攻。城を守れ</div>
+        <div style="color:#8aa0b4;margin-top:6px">13夜を生き延びれば勝利。城HPが0で敗北。</div>
+      </div>
+      <button class="btn primary" id="startGameBtn" style="font-size:16px;padding:12px 28px">はじめる</button>
+    </div>
+  </div>
+
+  <div id="loading">3Dエンジン読み込み中…</div>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+
+/* =========================================================================
+   VoiceThrone モック v0.2 — Thronefall「Nordfels」3Dクォータービュー
+   ロジックは2D版v0.1を流用。描画/カメラ/入力をThree.jsで3D化。
+   見た目方針: ローポリ＋トゥーン＋輪郭線／昼=明パステル+くっきり影／夜=濃紺+暖色グロー
+   ========================================================================= */
+
+// ===== ワールド変換（2Dロジック座標 ⇔ 3D） =============================
+const S = 0.12;                          // 2D px → world 単位
+const toWX = (x) => (x - 480) * S;
+const toWZ = (y) => (y - 300) * S;
+const fromWX = (wx) => wx / S + 480;
+const fromWZ = (wz) => wz / S + 300;
+
+// ===== グローバル状態（v0.1ロジック流用） ==============================
+const STATE = { TITLE:'title', DAY:'day', NIGHT:'night', WIN:'win', LOSE:'lose' };
+let state = STATE.TITLE;
+let gold = 12;
+let nightIndex = 0;
+const TOTAL_NIGHTS = 13;
+
+const castle = { x: 480, y: 300, r: 34, hp: 1000, maxHp: 1000 };
+const king = {
+  x: 480, y: 370, r: 11, speed: 165, dir: 0,
+  hp: 100, maxHp: 100, downed: 0,
+  bowRange: 165, bowDmg: 5, bowCd: 0, bowInterval: 0.95,
+  daggerCd: 0, daggerMax: 4.0, daggerDmg: 26, daggerRange: 46, flash: 0,
+};
+
+const SPAWNS = {
+  NE: { x: 870, y: 80,  name:'北東' },
+  E:  { x: 920, y: 300, name:'東' },
+  SE: { x: 870, y: 520, name:'南東' },
+  S:  { x: 480, y: 564, name:'南' },
+  W:  { x: 40,  y: 300, name:'西' },
+};
+const FLY_DIRS = ['W','S','NE'];
+const ALL_DIRS = ['NE','E','SE','S','W'];
+
+const nodes = [];
+function buildNodes() {
+  const rings = [ {r:235,n:9,off:0}, {r:150,n:8,off:0.39}, {r:85,n:6,off:0} ];
+  let id = 0;
+  for (const ring of rings) for (let i=0;i<ring.n;i++){
+    const a = ring.off + (i/ring.n)*Math.PI*2;
+    nodes.push({ id:id++, x: 480+Math.cos(a)*ring.r, y: 300+Math.sin(a)*ring.r*0.82, building:null, ring3d:null });
+  }
+}
+
+const BUILDINGS = {
+  house: { name:'家', cost:2, levels:[ {income:1}, {income:2, upCost:2} ] },
+  tower: { name:'弓櫓', cost:3, r:13, levels:[ {dmg:8,range:130,interval:0.8,hp:100}, {dmg:12,range:150,interval:0.62,hp:250,upCost:5} ] },
+  wall:  { name:'壁', cost:3, r:15, levels:[ {hp:240}, {hp:640, upCost:4} ] },
+};
+
+const ENEMIES = {
+  swordsman: { jp:'剣士',   r:7,  hp:9,   speed:30, dmgCastle:4,  dmgStruct:6,  atkRange:16, atkInt:0.8, gold:1, target:'castle' },
+  archer:    { jp:'弓兵',   r:7,  hp:14,  speed:26, dmgCastle:3,  dmgStruct:2,  atkRange:120,atkInt:1.0, gold:1, target:'castle', ranged:true },
+  ogre:      { jp:'オーガ', r:14, hp:200, speed:22, dmgCastle:20, dmgStruct:24, atkRange:22, atkInt:1.0, gold:5, target:'castle' },
+  racer:     { jp:'レーサー',r:6,  hp:35,  speed:78, dmgCastle:18, dmgStruct:5,  atkRange:14, atkInt:0.5, gold:2, target:'castle', wallOnly:true },
+  wasp:      { jp:'ワスプ', r:6,  hp:25,  speed:60, dmgCastle:6,  dmgStruct:6,  atkRange:60, atkInt:0.7, gold:2, target:'castle', flying:true, ranged:true },
+  hunterling:{ jp:'ハンターリング',r:7,hp:30,speed:34,dmgCastle:8, dmgStruct:8,  atkRange:18, atkInt:0.8, gold:2, target:'king' },
+  catapult:  { jp:'カタパルト',r:13,hp:45, speed:16, dmgCastle:60, dmgStruct:150,atkRange:150,atkInt:2.2, gold:4, target:'castle', ranged:true, siege:true },
+};
+
+const WAVES = [
+  [['swordsman',3]], [['swordsman',8]], [['swordsman',8],['hunterling',2]],
+  [['archer',24]], [['racer',15]], [['swordsman',20],['archer',20]],
+  [['wasp',15]], [['swordsman',30],['hunterling',10],['racer',10]], [['wasp',25],['ogre',5]],
+  [['swordsman',90],['ogre',3]], [['archer',50],['racer',30]], [['hunterling',5]],
+  [['swordsman',80],['racer',35],['wasp',30],['archer',30],['catapult',16],['ogre',7],['hunterling',5]],
+];
+
+let enemies = [], projectiles = [], particles = [], spawnQueue = [];
+let nightTimer = 0, selectedNode = null;
+
+// ===== 入力 =============================================================
+const keys = {};
+addEventListener('keydown', e => { keys[e.key.toLowerCase()] = true; if (e.key===' '){ e.preventDefault(); tryDagger(); }});
+addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
+
+// =========================================================================
+//  Three.js セットアップ
+// =========================================================================
+const container = document.getElementById('three');
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(34, innerWidth/innerHeight, 0.5, 600);
+const renderer = new THREE.WebGLRenderer({ antialias:true });
+renderer.setPixelRatio(Math.min(2, devicePixelRatio));
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+container.appendChild(renderer.domElement);
+
+// ポストプロセス（夜のグロー）
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, camera));
+const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.25, 0.7, 0.85);
+composer.addPass(bloom);
+
+// トゥーン用の3段グラデーション
+const toonRamp = (() => {
+  const d = new Uint8Array([90, 170, 255]);
+  const t = new THREE.DataTexture(d, d.length, 1, THREE.RedFormat);
+  t.minFilter = t.magFilter = THREE.NearestFilter; t.needsUpdate = true; return t;
+})();
+function toonMat(color, flat=true){ return new THREE.MeshToonMaterial({ color, gradientMap: toonRamp }); }
+
+// ライト
+const sun = new THREE.DirectionalLight(0xfff4e0, 1.5);
+sun.position.set(28, 46, 20); sun.castShadow = true;
+sun.shadow.mapSize.set(2048,2048);
+Object.assign(sun.shadow.camera, { left:-80, right:80, top:60, bottom:-60, near:1, far:200 });
+sun.shadow.bias = -0.0005;
+scene.add(sun);
+const ambient = new THREE.HemisphereLight(0xbfd8f0, 0x4a5a3a, 0.75);
+scene.add(ambient);
+
+// 背景・フォグ
+scene.background = new THREE.Color(0xcfe6f5);
+scene.fog = new THREE.Fog(0xcfe6f5, 70, 175);
+
+// ----- 輪郭線ヘルパー（インバーテッドハル） -----
+const OUTLINE_MAT = new THREE.MeshBasicMaterial({ color:0x20242a, side:THREE.BackSide });
+function outlined(mesh, k=1.06){
+  const o = new THREE.Mesh(mesh.geometry, OUTLINE_MAT);
+  o.scale.multiplyScalar(k); mesh.add(o); return mesh;
+}
+function mk(geo, color, {cast=true, recv=false, outline=true}={}){
+  const m = new THREE.Mesh(geo, toonMat(color));
+  m.castShadow = cast; m.receiveShadow = recv;
+  if (outline) outlined(m);
+  return m;
+}
+// 共有ジオメトリ／マテリアル（弾・パーティクルの使い捨てを避ける）
+const PROJ_GEO = new THREE.SphereGeometry(0.13,6,6);
+const PART_GEO = new THREE.SphereGeometry(0.12,5,5);
+const _projMatCache = {};
+function projMat(c){ return _projMatCache[c] || (_projMatCache[c]=new THREE.MeshBasicMaterial({color:c})); }
+// メッシュ破棄（共有ジオメトリ／共有マテリアルは残す）
+function disposeObject(root){
+  root.traverse(o=>{
+    if(o.geometry && o.geometry!==PROJ_GEO && o.geometry!==PART_GEO) o.geometry.dispose();
+    const m=o.material;
+    if(m && m!==OUTLINE_MAT){ Array.isArray(m)?m.forEach(x=>x.dispose()):m.dispose(); }
+  });
+}
+
+// =========================================================================
+//  ワールド（地形・水・木・岩・城・スポーン）
+// =========================================================================
+const worldGroup = new THREE.Group(); scene.add(worldGroup);
+
+// 水面（広い青平面）
+const water = new THREE.Mesh(new THREE.PlaneGeometry(260, 200),
+  new THREE.MeshToonMaterial({ color:0x4fa3d1, gradientMap:toonRamp, transparent:true, opacity:0.92 }));
+water.rotation.x = -Math.PI/2; water.position.y = -0.6; water.receiveShadow = true; worldGroup.add(water);
+
+// 草原（起伏ローポリ）
+const groundGeo = new THREE.PlaneGeometry(150, 108, 44, 32);
+const gp = groundGeo.attributes.position;
+for (let i=0;i<gp.count;i++){
+  const x = gp.getX(i), y = gp.getY(i);
+  const edge = Math.max(Math.abs(x)/75, Math.abs(y)/54);
+  const h = (Math.sin(x*0.18)*Math.cos(y*0.2))*0.5 + (Math.random()*0.35);
+  gp.setZ(i, h * (1-edge*0.4) - edge*edge*1.5);  // 縁は少し下げて水際に
+}
+groundGeo.computeVertexNormals();
+const ground = new THREE.Mesh(groundGeo, toonMat(0x8bc34a));
+ground.rotation.x = -Math.PI/2; ground.receiveShadow = true; worldGroup.add(ground);
+const groundY = 0; // ロジックは平面上で動く想定
+
+// 道（建設リングをうっすら示す環状パス）
+const path = new THREE.Mesh(new THREE.RingGeometry(85*S-0.6, 235*S+0.6, 48),
+  new THREE.MeshToonMaterial({ color:0xc8a86a, gradientMap:toonRamp, transparent:true, opacity:0.5 }));
+path.rotation.x = -Math.PI/2; path.position.y = 0.06; worldGroup.add(path);
+
+// 木
+function makeTree(x,z){
+  const g = new THREE.Group();
+  const trunk = mk(new THREE.CylinderGeometry(0.18,0.26,1.1,6), 0x6e4b2a, {outline:true});
+  trunk.position.y = 0.55; g.add(trunk);
+  const canopy = mk(new THREE.IcosahedronGeometry(1.1,0), 0xd8c24a, {outline:true});
+  canopy.position.y = 1.7; canopy.scale.y = 1.15; g.add(canopy);
+  g.position.set(x, 0, z); worldGroup.add(g); return g;
+}
+// 岩
+function makeRock(x,z,s=1){
+  const r = mk(new THREE.DodecahedronGeometry(s,0), 0x9e9e9e, {outline:true});
+  r.position.set(x, s*0.3, z); r.rotation.set(Math.random(),Math.random(),Math.random());
+  worldGroup.add(r); return r;
+}
+// 縁を岩で囲い、内側に木を散らす（ノードを避けた決め打ち配置）
+for (let a=0;a<Math.PI*2;a+=0.34){ const rr=64+Math.random()*6;
+  makeRock(Math.cos(a)*rr, Math.sin(a)*rr*0.72, 1.1+Math.random()*1.2); }
+[[ -42,-26],[44,-22],[-46,20],[40,26],[-20,-34],[22,32],[-54,-2],[52,4]].forEach(([x,z])=>makeTree(x,z));
+// 北の山（大きめの岩塊）
+[[-30,-46],[-12,-50],[8,-49],[28,-47]].forEach(([x,z])=>makeRock(x,z,3+Math.random()*1.5));
+
+// スポーン地点マーカー（赤いリング＋柱）
+const spawnMarks = {};
+for (const k of ALL_DIRS){ const s = SPAWNS[k];
+  const g = new THREE.Group();
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(1.6,0.18,8,20),
+    new THREE.MeshBasicMaterial({ color:0xff5a5a }));
+  ring.rotation.x = -Math.PI/2; ring.position.y = 0.1; g.add(ring);
+  const post = mk(new THREE.ConeGeometry(0.5,1.6,6), 0xb03030, {outline:true});
+  post.position.y = 0.8; g.add(post);
+  g.position.set(toWX(s.x), 0, toWZ(s.y)); worldGroup.add(g); spawnMarks[k]=g;
+}
+
+// ----- 城 -----
+const castleGroup = new THREE.Group();
+castleGroup.position.set(toWX(castle.x), 0, toWZ(castle.y)); scene.add(castleGroup);
+(() => {
+  const base = mk(new THREE.CylinderGeometry(3.4,3.8,2.2,10), 0x8a8a8a, {recv:true}); base.position.y=1.1; castleGroup.add(base);
+  const keep = mk(new THREE.BoxGeometry(2.6,2.8,2.6), 0x9a9a9a); keep.position.y=2.6; castleGroup.add(keep);
+  // 胸壁
+  for (let i=0;i<10;i++){ const a=i/10*Math.PI*2; const c=mk(new THREE.BoxGeometry(0.5,0.6,0.5),0x7e7e7e);
+    c.position.set(Math.cos(a)*3.4, 2.3, Math.sin(a)*3.4); castleGroup.add(c); }
+  // 旗
+  const pole = mk(new THREE.CylinderGeometry(0.07,0.07,2.2,5), 0xdddddd, {outline:false}); pole.position.set(0,5.1,0); castleGroup.add(pole);
+  const flag = mk(new THREE.BoxGeometry(1.3,0.8,0.08), 0x2e6fd6); flag.position.set(0.72,5.4,0); castleGroup.add(flag);
+})();
+
+// =========================================================================
+//  キング（青い騎乗＋金の王冠）
+// =========================================================================
+const kingGroup = new THREE.Group(); scene.add(kingGroup);
+(() => {
+  const horse = mk(new THREE.BoxGeometry(1.9,0.85,0.95), 0x3b5a8a); horse.position.y=0.95; kingGroup.add(horse);
+  for (const [dx,dz] of [[0.7,0.35],[0.7,-0.35],[-0.7,0.35],[-0.7,-0.35]]){
+    const leg = mk(new THREE.BoxGeometry(0.22,0.9,0.22), 0x2e4668);
+    leg.position.set(dx,0.45,dz); kingGroup.add(leg);
+  }
+  const neck = mk(new THREE.BoxGeometry(0.5,0.8,0.5), 0x3b5a8a); neck.position.set(1.0,1.45,0); kingGroup.add(neck);
+  const rider = mk(new THREE.CapsuleGeometry(0.34,0.7,4,8), 0x2e6fd6); rider.position.set(-0.1,1.95,0); kingGroup.add(rider);
+  const crown = mk(new THREE.ConeGeometry(0.34,0.4,5), 0xf2c84b, {outline:false}); crown.position.set(-0.1,2.65,0); kingGroup.add(crown);
+  kingGroup.userData.crown = crown;
+})();
+// ダガー範囲リング
+const daggerRing = new THREE.Mesh(new THREE.TorusGeometry(king.daggerRange*S,0.12,8,28),
+  new THREE.MeshBasicMaterial({ color:0xffffff, transparent:true, opacity:0 }));
+daggerRing.rotation.x=-Math.PI/2; daggerRing.position.y=0.1; kingGroup.add(daggerRing);
+
+// =========================================================================
+//  エンティティのメッシュ生成
+// =========================================================================
+const ENEMY_COLOR = { base:0xd63a36, hunterling:0xff5fa0, racer:0xe0683a, wasp:0xc0463a, ogre:0xb03030, catapult:0x9a3a2a, archer:0xcf5a3a };
+function makeEnemyMesh(type){
+  const def = ENEMIES[type]; const g = new THREE.Group();
+  const col = ENEMY_COLOR[type] || ENEMY_COLOR.base;
+  const rr = def.r * S;
+  let body;
+  if (type==='ogre'){ body = mk(new THREE.CapsuleGeometry(rr*0.9, rr*1.6, 4,8), col); body.position.y=rr*1.5; }
+  else if (type==='wasp'){ body = mk(new THREE.IcosahedronGeometry(rr*1.2,0), col,{outline:false});
+    const w1=mk(new THREE.BoxGeometry(rr*2.4,0.05,rr*0.8),0xffffff,{outline:false,cast:false}); w1.position.y=rr*0.3; body.add(w1); body.position.y=0; }
+  else if (type==='racer'){ body = mk(new THREE.ConeGeometry(rr*1.1, rr*2.4, 6), col); body.rotation.z=Math.PI/2; body.position.y=rr; }
+  else if (type==='catapult'){ body = mk(new THREE.BoxGeometry(rr*1.6,rr*1.4,rr*1.8), col); body.position.y=rr*0.9;
+    const arm=mk(new THREE.BoxGeometry(0.15,rr*2,0.15),0x6e4b2a); arm.position.set(0,rr*1.8,0); arm.rotation.z=-0.5; body.add(arm); }
+  else if (type==='hunterling'){ body = mk(new THREE.CapsuleGeometry(rr*0.8,rr*1.1,4,8), col);
+    const eye=mk(new THREE.SphereGeometry(rr*0.4,8,8),0xffe0e0,{outline:false}); eye.position.set(rr*0.6,rr*0.7,0); body.add(eye); body.position.y=rr*1.1; }
+  else { body = mk(new THREE.CapsuleGeometry(rr*0.7, rr*1.1, 4,8), col); body.position.y=rr*1.1;
+    if (type==='archer'){ const bow=mk(new THREE.TorusGeometry(rr*0.7,0.06,6,10,Math.PI),0x6e4b2a,{outline:false}); bow.position.set(rr*0.7,rr*0.4,0); body.add(bow); } }
+  // emissiveで夜ブルームに映える赤
+  body.traverse(o=>{ if(o.material && o.material.emissive!==undefined && o.material!==OUTLINE_MAT){ o.material.emissive=new THREE.Color(col); o.material.emissiveIntensity=0.0; }});
+  g.add(body); g.userData.body = body;
+  scene.add(g); return g;
+}
+
+const BCOL = { houseWall:0xe0c89a, houseRoof:0xb5562e, stone:0x8a8a8a, stoneDark:0x6f6f6f };
+function makeBuildingMesh(type, level){
+  const g = new THREE.Group();
+  if (type==='house'){
+    const w = mk(new THREE.BoxGeometry(1.7,1.1,1.7), BCOL.houseWall); w.position.y=0.55; g.add(w);
+    const roof = mk(new THREE.ConeGeometry(1.4,1.1,4), BCOL.houseRoof); roof.position.y=1.65; roof.rotation.y=Math.PI/4; g.add(roof);
+  } else if (type==='tower'){
+    const h = level>0?3.4:2.8;
+    const t = mk(new THREE.CylinderGeometry(0.85,1.05,h,8), BCOL.stone); t.position.y=h/2; g.add(t);
+    for (let i=0;i<6;i++){ const a=i/6*Math.PI*2; const c=mk(new THREE.BoxGeometry(0.3,0.4,0.3),BCOL.stoneDark);
+      c.position.set(Math.cos(a)*0.85,h,Math.sin(a)*0.85); g.add(c); }
+    const ar = mk(new THREE.CapsuleGeometry(0.22,0.4,4,6), 0x2e6fd6); ar.position.y=h+0.4; g.add(ar); // 青い弓兵
+  } else if (type==='wall'){
+    for (let i=-1;i<=1;i++){ const b=mk(new THREE.BoxGeometry(1.0,level>0?1.5:1.1,1.5), i===0?BCOL.stone:BCOL.stoneDark);
+      b.position.set(i*1.0,(level>0?0.75:0.55),0); g.add(b); }
+  }
+  g.userData.light = null;
+  // 夜の灯り（家・櫓）
+  if (type!=='wall'){ const pl = new THREE.PointLight(0xff9a3c, 0, 9, 2); pl.position.y=2; g.add(pl); g.userData.light = pl; }
+  scene.add(g); return g;
+}
+
+// パーティクル（ヒット）
+function spawnHitFx(wx,wy,wz,color){
+  for (let i=0;i<6;i++){ const p=new THREE.Mesh(PART_GEO, new THREE.MeshBasicMaterial({ color, transparent:true }));
+    p.position.set(wx,wy,wz);
+    p.userData = { vx:(Math.random()-0.5)*6, vy:Math.random()*5+1, vz:(Math.random()-0.5)*6, t:0.45 };
+    scene.add(p); particles.push(p); }
+}
+
+// =========================================================================
+//  建設まわり（v0.1流用＋メッシュ生成）
+// =========================================================================
+const canvasEl = renderer.domElement;
+const raycaster = new THREE.Raycaster();
+const ndc = new THREE.Vector2();
+canvasEl.addEventListener('pointerdown', (e) => {
+  if (state !== STATE.DAY) return;
+  ndc.x = (e.clientX/innerWidth)*2-1; ndc.y = -(e.clientY/innerHeight)*2+1;
+  raycaster.setFromCamera(ndc, camera);
+  // 建物（立体）も判定対象に含める。建物に当たればそのノードを直接選択
+  const targets = [ground];
+  for (const n of nodes) if (n.building && n.building.mesh) targets.push(n.building.mesh);
+  const hit = raycaster.intersectObjects(targets, true)[0];
+  if (!hit) { selectedNode=null; renderBuildBar(); updateNodeRings(); return; }
+  let obj = hit.object, node = null;
+  while (obj){ if (obj.userData && obj.userData.node){ node = obj.userData.node; break; } obj = obj.parent; }
+  if (!node){
+    // 地面ヒット → 近傍ノード（空きノード建設用）
+    const x2 = fromWX(hit.point.x), y2 = fromWZ(hit.point.z);
+    let best=null, bd=42;
+    for (const n of nodes){ const d=Math.hypot(n.x-x2,n.y-y2); if(d<bd){bd=d;best=n;} }
+    node = best;
+  }
+  selectedNode = node; renderBuildBar(); updateNodeRings();
+});
+
+function renderBuildBar(){
+  const bar = document.getElementById('buildbar');
+  if (state!==STATE.DAY || !selectedNode){ bar.style.display='none'; return; }
+  bar.style.display='flex';
+  const n = selectedNode; let html = `<span class="title">ノード#${n.id}</span>`;
+  if (!n.building){
+    for (const key of ['house','tower','wall']){ const b=BUILDINGS[key]; const ok=gold>=b.cost;
+      html += `<div class="bitem ${ok?'':'disabled'}" data-build="${key}">${b.name} <span class="c">${b.cost}G</span><small>${descOf(key,0)}</small></div>`; }
+  } else {
+    const b=BUILDINGS[n.building.type], lv=n.building.level;
+    html += `<span style="color:#8aa0b4;font-size:12px">${b.name} Lv${lv+1}</span>`;
+    const next=b.levels[lv+1];
+    if (next){ const ok=gold>=next.upCost;
+      html += `<div class="bitem ${ok?'':'disabled'}" data-up="1">強化 <span class="c">${next.upCost}G</span><small>${descOf(n.building.type,lv+1)}</small></div>`; }
+    else html += `<span style="color:#5f7080;font-size:12px">最大強化</span>`;
+    html += `<div class="bitem" data-sell="1">撤去 <small>少し返金</small></div>`;
+  }
+  bar.innerHTML = html;
+  bar.querySelectorAll('[data-build]').forEach(el=>el.onclick=()=>doBuild(el.dataset.build));
+  bar.querySelectorAll('[data-up]').forEach(el=>el.onclick=doUpgrade);
+  bar.querySelectorAll('[data-sell]').forEach(el=>el.onclick=doSell);
+}
+function descOf(type,lv){ const L=BUILDINGS[type].levels[lv];
+  if(type==='house')return `毎朝 +${L.income}G`; if(type==='tower')return `攻撃${L.dmg}・射程${L.range}`; if(type==='wall')return `HP${L.hp}の盾`; return ''; }
+
+function doBuild(type){
+  if(!selectedNode || selectedNode.building) return;
+  const b=BUILDINGS[type];
+  if(gold<b.cost){ toast('ゴールドが足りない'); return; }
+  gold-=b.cost; const L=b.levels[0];
+  const bd = { type, level:0, hp:(L.hp||0), maxHp:(L.hp||0), cd:0, x:selectedNode.x, y:selectedNode.y, mesh:null };
+  bd.mesh = makeBuildingMesh(type,0); bd.mesh.position.set(toWX(bd.x),0,toWZ(bd.y)); bd.mesh.userData.node = selectedNode;
+  selectedNode.building = bd; toast(`${b.name}を建設`); updateHud(); renderBuildBar(); updateNodeRings();
+}
+function doUpgrade(){
+  const node=selectedNode; if(!node||!node.building) return;
+  const bd=node.building, b=BUILDINGS[bd.type]; const next=b.levels[bd.level+1];
+  if(!next){ toast('最大強化です'); return; }
+  if(gold<next.upCost){ toast('ゴールドが足りない'); return; }
+  gold-=next.upCost; bd.level++;
+  if(next.hp){ bd.maxHp=next.hp; bd.hp=next.hp; }
+  if(bd.mesh){ scene.remove(bd.mesh); disposeObject(bd.mesh);
+    bd.mesh=makeBuildingMesh(bd.type,bd.level); bd.mesh.position.set(toWX(bd.x),0,toWZ(bd.y)); bd.mesh.userData.node=node; }
+  toast(`${b.name}を強化 Lv${bd.level+1}`); updateHud(); renderBuildBar();
+}
+function doSell(){
+  const node=selectedNode; if(!node||!node.building) return;
+  const bd=node.building, b=BUILDINGS[bd.type]; gold+=Math.ceil(b.cost/2);
+  if(bd.mesh){ scene.remove(bd.mesh); disposeObject(bd.mesh); } node.building=null;
+  toast('撤去'); updateHud(); renderBuildBar(); updateNodeRings();
+}
+
+// ノードの光るリング（昼のみ）
+function updateNodeRings(){
+  for (const n of nodes){
+    if (!n.ring3d){
+      const r = new THREE.Mesh(new THREE.TorusGeometry(1.0,0.08,6,18),
+        new THREE.MeshBasicMaterial({ color:0xffe08a, transparent:true, opacity:0.7 }));
+      r.rotation.x=-Math.PI/2; r.position.set(toWX(n.x),0.08,toWZ(n.y)); scene.add(r); n.ring3d=r;
+    }
+    const show = state===STATE.DAY && !n.building;
+    n.ring3d.visible = show;
+    n.ring3d.material.color.setHex(selectedNode===n ? 0xffd45e : 0xffe08a);
+    n.ring3d.scale.setScalar(selectedNode===n ? 1.25 : 1.0);
+  }
+}
+
+// =========================================================================
+//  夜の進行（v0.1流用）
+// =========================================================================
+function startNight(){
+  if (state!==STATE.DAY) return;
+  nightIndex++; state=STATE.NIGHT; selectedNode=null; renderBuildBar(); updateNodeRings();
+  document.getElementById('startNightBtn').style.display='none';
+  buildSpawnQueue(nightIndex); nightTimer=0;
+  setDayNight(1); toast(`夜 ${nightIndex} / ${TOTAL_NIGHTS} — 侵攻開始`); updateHud();
+}
+function buildSpawnQueue(n){
+  spawnQueue=[]; const wave=WAVES[n-1]; let list=[];
+  for(const [type,count] of wave) for(let i=0;i<count;i++) list.push(type);
+  list=shuffle(list); const interval=clamp(7/list.length,0.18,1.4);
+  let t=0.6, di=0;
+  for(const type of list){ const pool=ENEMIES[type].flying?FLY_DIRS:ALL_DIRS; spawnQueue.push({t,type,dir:pool[di%pool.length]}); di++; t+=interval; }
+}
+function spawnEnemy(type,dir){
+  const def=ENEMIES[type], s=SPAWNS[dir];
+  const e={ type,def, x:s.x+rnd(-14,14), y:s.y+rnd(-14,14), hp:def.hp, maxHp:def.hp, cd:0, flash:0, target:def.target, mesh:makeEnemyMesh(type) };
+  enemies.push(e);
+}
+function nightCleared(){
+  let income=0;
+  for(const n of nodes) if(n.building&&n.building.type==='house') income+=BUILDINGS.house.levels[n.building.level].income;
+  gold+=income;
+  for(const n of nodes) if(n.building&&n.building.maxHp) n.building.hp=n.building.maxHp;
+  king.hp=king.maxHp; king.downed=0;
+  if(nightIndex>=TOTAL_NIGHTS){ win(); return; }
+  state=STATE.DAY; document.getElementById('startNightBtn').style.display=''; setDayNight(0);
+  updateNodeRings(); toast(`夜明け — 収入 +${income}G（次は夜 ${nightIndex+1}）`); updateHud();
+}
+
+// =========================================================================
+//  攻撃（v0.1流用＋FX）
+// =========================================================================
+function tryDagger(){
+  if(state!==STATE.NIGHT||king.downed>0||king.daggerCd>0) return;
+  king.daggerCd=king.daggerMax; king.flash=0.2; let hit=0;
+  for(const e of enemies) if(Math.hypot(e.x-king.x,e.y-king.y)<=king.daggerRange+e.def.r){ damageEnemy(e,king.daggerDmg,true); hit++; }
+  spawnHitFx(toWX(king.x),1.2,toWZ(king.y),0xffffff);
+  if(!hit) toast('短剣（空振り）');
+}
+function damageEnemy(e,dmg){ e.hp-=dmg; e.flash=0.12; }
+function damageCastle(dmg){ castle.hp-=dmg; if(castle.hp<=0){ castle.hp=0; lose(); } }
+function damageKing(dmg){ if(king.downed>0) return; king.hp-=dmg; king.flash=0.15;
+  if(king.hp<=0){ king.hp=0; king.downed=3.0; toast('王がダウン！城へ復帰中'); } }
+
+function fireArrow(x,y,target,dmg,color){
+  const m=new THREE.Mesh(PROJ_GEO, projMat(color));
+  m.position.set(toWX(x),1.0,toWZ(y)); scene.add(m);
+  projectiles.push({ x,y,target,dmg,color,speed:420,dead:false,mesh:m });
+}
+
+// =========================================================================
+//  メイン更新（v0.1ロジック）
+// =========================================================================
+function update(dt){
+  updateKing(dt);
+  if(state===STATE.NIGHT){
+    nightTimer+=dt;
+    while(spawnQueue.length && spawnQueue[0].t<=nightTimer){ const s=spawnQueue.shift(); spawnEnemy(s.type,s.dir); }
+    updateEnemies(dt); updateTowers(dt);
+    if(!spawnQueue.length && enemies.length===0) nightCleared();
+  }
+  updateProjectiles(dt); updateParticles(dt); updateHud(); updateWarnIcons();
+}
+function updateKing(dt){
+  if(king.downed>0){ king.downed-=dt; king.x+=(castle.x-king.x)*Math.min(1,dt*4); king.y+=((castle.y+60)-king.y)*Math.min(1,dt*4);
+    if(king.downed<=0) king.hp=king.maxHp;
+  } else {
+    let dx=0,dy=0;
+    if(keys['a']||keys['arrowleft'])dx-=1; if(keys['d']||keys['arrowright'])dx+=1;
+    if(keys['w']||keys['arrowup'])dy-=1; if(keys['s']||keys['arrowdown'])dy+=1;
+    const len=Math.hypot(dx,dy);
+    if(len>0){ king.x+=(dx/len)*king.speed*dt; king.y+=(dy/len)*king.speed*dt; king.dir=Math.atan2(dx,-dy); }
+    king.x=clamp(king.x,30,930); king.y=clamp(king.y,30,564);
+  }
+  king.flash=Math.max(0,king.flash-dt);
+  if(king.daggerCd>0) king.daggerCd-=dt;
+  if(state===STATE.DAY && king.hp<king.maxHp) king.hp=Math.min(king.maxHp,king.hp+30*dt);
+  if(state===STATE.NIGHT && king.downed<=0){ king.bowCd-=dt;
+    if(king.bowCd<=0){ const t=nearestEnemy(king.x,king.y,king.bowRange); if(t){ fireArrow(king.x,king.y,t,king.bowDmg,0xffe28a); king.bowCd=king.bowInterval; } } }
+}
+function updateEnemies(dt){
+  for(const e of enemies){
+    e.flash=Math.max(0,e.flash-dt); if(e.cd>0) e.cd-=dt; const def=e.def;
+    let tx,ty; if(e.target==='king'){tx=king.x;ty=king.y;} else {tx=castle.x;ty=castle.y;}
+    let blocker=null,bdist=1e9;
+    if(!def.flying) for(const n of nodes){ const b=n.building; if(!b) continue;
+      if(def.wallOnly&&b.type!=='wall') continue; if(!b.maxHp) continue;
+      const d=Math.hypot(b.x-e.x,b.y-e.y); const reach=def.r+(BUILDINGS[b.type].r||14)+def.atkRange*0.4;
+      if(d<reach&&d<bdist){bdist=d;blocker=b;} }
+    const dCastle=Math.hypot(castle.x-e.x,castle.y-e.y);
+    const castleReach=def.r+castle.r+(def.ranged?def.atkRange:6);
+    let kingReach=false;
+    if(e.target==='king'&&king.downed<=0&&Math.hypot(king.x-e.x,king.y-e.y)<=def.r+king.r+def.atkRange*0.5) kingReach=true;
+    if(kingReach){ if(e.cd<=0){ damageKing(def.dmgCastle); e.cd=def.atkInt; } }
+    else if(e.target!=='king'&&dCastle<=castleReach){ if(e.cd<=0){ damageCastle(def.dmgCastle); e.cd=def.atkInt; e.flash=0.1; } }
+    else if(blocker&&bdist<=def.r+(BUILDINGS[blocker.type].r||14)+(def.ranged?def.atkRange:8)){
+      if(e.cd<=0){ blocker.hp-=def.dmgStruct; e.cd=def.atkInt; if(blocker.hp<=0) removeBuilding(blocker); } }
+    else {
+      let ax=tx-e.x, ay=ty-e.y; const al=Math.hypot(ax,ay)||1; ax/=al; ay/=al;
+      if(blocker){ const wx=blocker.x-e.x, wy=blocker.y-e.y; ax+=-wy*0.012; ay+=wx*0.012; const l2=Math.hypot(ax,ay)||1; ax/=l2; ay/=l2; }
+      e.x+=ax*def.speed*dt; e.y+=ay*def.speed*dt;
+      if(e.mesh) e.mesh.rotation.y=Math.atan2(ax,ay);
+    }
+  }
+  enemies = enemies.filter(e=>{
+    if(e.hp<=0){ gold+=e.def.gold; if(e.mesh){ spawnHitFx(e.mesh.position.x,0.6,e.mesh.position.z, ENEMY_COLOR[e.type]||ENEMY_COLOR.base); scene.remove(e.mesh); disposeObject(e.mesh); } return false; }
+    return true;
+  });
+}
+function removeBuilding(b){
+  for(const n of nodes) if(n.building===b){ if(b.mesh){ scene.remove(b.mesh); disposeObject(b.mesh); } n.building=null;
+    if(selectedNode===n) renderBuildBar(); updateNodeRings(); }
+}
+function updateTowers(dt){
+  for(const n of nodes){ const b=n.building; if(!b||b.type!=='tower') continue;
+    const L=BUILDINGS.tower.levels[b.level]; b.cd-=dt;
+    if(b.cd<=0){ const t=nearestEnemy(b.x,b.y,L.range); if(t){ fireArrow(b.x,b.y,t,L.dmg,0x9fd0ff); b.cd=L.interval; } } }
+}
+function updateProjectiles(dt){
+  for(const p of projectiles){
+    if(!p.target||p.target.hp<=0){ p.dead=true; continue; }
+    const dx=p.target.x-p.x, dy=p.target.y-p.y, d=Math.hypot(dx,dy);
+    if(d<10){ damageEnemy(p.target,p.dmg); p.dead=true; }
+    else { p.x+=dx/d*p.speed*dt; p.y+=dy/d*p.speed*dt; if(p.mesh) p.mesh.position.set(toWX(p.x),1.0,toWZ(p.y)); }
+  }
+  projectiles = projectiles.filter(p=>{ if(p.dead && p.mesh) scene.remove(p.mesh); return !p.dead; });
+}
+function updateParticles(dt){
+  for(const p of particles){ const u=p.userData; u.t-=dt; u.vy-=14*dt;
+    p.position.x+=u.vx*dt; p.position.y+=u.vy*dt; p.position.z+=u.vz*dt;
+    p.material.opacity=Math.max(0,u.t*2.2); p.material.transparent=true; }
+  particles = particles.filter(p=>{ if(p.userData.t<=0){ scene.remove(p); p.material.dispose(); return false; } return true; });
+}
+
+// =========================================================================
+//  シーン同期・カメラ・昼夜
+// =========================================================================
+function syncScene(){
+  // 王
+  kingGroup.position.set(toWX(king.x),0,toWZ(king.y));
+  kingGroup.rotation.y = king.dir;
+  kingGroup.visible = (state===STATE.NIGHT||state===STATE.DAY);
+  kingGroup.userData.crown.material.emissive?.setHex(0x000000);
+  daggerRing.material.opacity = king.flash>0 ? 0.8 : 0;
+  // 敵 flash（emissiveで点滅）
+  for(const e of enemies){ if(!e.mesh) continue;
+    e.mesh.position.set(toWX(e.x), e.def.flying?3.5:0, toWZ(e.y));
+    const body=e.mesh.userData.body; if(body){ body.traverse(o=>{ if(o.material&&o.material.emissive&&o.material!==OUTLINE_MAT){
+      o.material.emissiveIntensity = e.flash>0 ? 0.9 : (nightT*0.35); }}); }
+  }
+}
+// 昼夜補間
+let nightT = 0, nightTarget = 0;
+function setDayNight(v){ nightTarget=v; }
+const DAY = { sun:new THREE.Color(0xfff4e0), sunI:1.5, amb:0.75, sky:new THREE.Color(0xcfe6f5), fogN:70, fogF:175, bloom:0.25 };
+const NGT = { sun:new THREE.Color(0x3a4a7a), sunI:0.35, amb:0.32, sky:new THREE.Color(0x16203e), fogN:34, fogF:120, bloom:1.05 };
+const _c = new THREE.Color();
+function applyDayNight(){
+  const t=nightT;
+  sun.color.copy(DAY.sun).lerp(NGT.sun,t); sun.intensity=DAY.sunI+(NGT.sunI-DAY.sunI)*t;
+  ambient.intensity=DAY.amb+(NGT.amb-DAY.amb)*t;
+  _c.copy(DAY.sky).lerp(NGT.sky,t); scene.background.copy(_c); scene.fog.color.copy(_c);
+  scene.fog.near=DAY.fogN+(NGT.fogN-DAY.fogN)*t; scene.fog.far=DAY.fogF+(NGT.fogF-DAY.fogF)*t;
+  bloom.strength=DAY.bloom+(NGT.bloom-DAY.bloom)*t;
+  // 建物の灯り
+  for(const n of nodes){ const b=n.building; if(b&&b.mesh&&b.mesh.userData.light) b.mesh.userData.light.intensity = t*1.6; }
+}
+function updateCamera(){
+  const kx=toWX(king.x), kz=toWZ(king.y);
+  camera.position.set(kx+0, 52, kz+38);   // 高さ52・手前38 → 俯角 ~54°
+  camera.lookAt(kx, 0, kz);
+}
+
+// 画面端の襲来方向アイコン（夜・残存スポーン方向）
+const warnEls = {};
+for(const k of ALL_DIRS){ const el=document.createElement('div'); el.className='warn'; el.textContent='⚔'; document.getElementById('wrap').appendChild(el); warnEls[k]=el; }
+const _v = new THREE.Vector3();
+function updateWarnIcons(){
+  const activeDirs = new Set();
+  if(state===STATE.NIGHT){
+    // スポーン地点ごとに、近くに敵が居る or まだ湧く予定があれば点灯
+    for(const k of ALL_DIRS){ const s=SPAWNS[k];
+      if(enemies.some(e=>Math.hypot(e.x-s.x,e.y-s.y)<260) || spawnQueue.some(q=>q.dir===k)) activeDirs.add(k); }
+  }
+  for(const k of ALL_DIRS){ const s=SPAWNS[k]; const el=warnEls[k];
+    _v.set(toWX(s.x),1,toWZ(s.y)).project(camera);
+    let sx=(_v.x*0.5+0.5)*innerWidth, sy=(-_v.y*0.5+0.5)*innerHeight;
+    sx=clamp(sx,16,innerWidth-40); sy=clamp(sy,80,innerHeight-90);
+    el.style.left=sx+'px'; el.style.top=sy+'px'; el.style.opacity = activeDirs.has(k)?1:0;
+  }
+}
+
+// =========================================================================
+//  HUD / オーバーレイ
+// =========================================================================
+function updateHud(){
+  document.getElementById('hudNight').textContent = nightIndex?`${nightIndex}/${TOTAL_NIGHTS}`:`0/${TOTAL_NIGHTS}`;
+  document.getElementById('hudGold').textContent = Math.floor(gold);
+  document.getElementById('hudCastle').textContent = Math.ceil(castle.hp);
+  document.getElementById('hudKing').textContent = Math.ceil(king.hp);
+  document.getElementById('hudEnemies').textContent = state===STATE.NIGHT?(enemies.length+spawnQueue.length):'—';
+}
+let toastT;
+function toast(msg){ const el=document.getElementById('toast'); el.textContent=msg; el.style.opacity=1; clearTimeout(toastT); toastT=setTimeout(()=>el.style.opacity=0,1900); }
+function showOverlay(html){ const ov=document.getElementById('overlay'); ov.classList.remove('hidden'); document.getElementById('card').innerHTML=html; }
+function hideOverlay(){ document.getElementById('overlay').classList.add('hidden'); }
+function win(){ state=STATE.WIN; setDayNight(0); showOverlay(`<h1 class="win">勝利！ 13夜を生き延びた</h1><div class="sub">Nordfels 制圧。</div><button class="btn primary" onclick="location.reload()" style="font-size:16px;padding:12px 28px">もう一度</button>`); }
+function lose(){ state=STATE.LOSE; showOverlay(`<h1 class="lose">敗北… 城が陥落</h1><div class="sub">夜 ${nightIndex} / ${TOTAL_NIGHTS} で力尽きた。</div><button class="btn primary" onclick="location.reload()" style="font-size:16px;padding:12px 28px">もう一度</button>`); }
+
+// ===== ユーティリティ =====
+function nearestEnemy(x,y,range){ let best=null,bd=range; for(const e of enemies){ const d=Math.hypot(e.x-x,e.y-y); if(d<bd){bd=d;best=e;} } return best; }
+function clamp(v,a,b){ return v<a?a:v>b?b:v; }
+function rnd(a,b){ return a+Math.random()*(b-a); }
+function shuffle(a){ for(let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; } return a; }
+
+// =========================================================================
+//  起動・ループ
+// =========================================================================
+function startGame(){
+  hideOverlay(); state=STATE.DAY; nightIndex=0; gold=12;
+  castle.hp=castle.maxHp; king.hp=king.maxHp; king.x=480; king.y=370;
+  // 残存エンティティ掃除
+  for(const e of enemies) if(e.mesh){ scene.remove(e.mesh); disposeObject(e.mesh); }
+  for(const p of projectiles) if(p.mesh) scene.remove(p.mesh);
+  for(const p of particles){ scene.remove(p); p.material.dispose(); }
+  for(const n of nodes) if(n.building&&n.building.mesh){ scene.remove(n.building.mesh); disposeObject(n.building.mesh); n.building=null; }
+  enemies=[]; projectiles=[]; particles=[]; spawnQueue=[];
+  document.getElementById('startNightBtn').style.display='';
+  setDayNight(0); nightT=0; updateNodeRings();
+  toast('昼フェーズ — ノードをクリックして守りを固めよう'); updateHud();
+}
+
+let last=0;
+function loop(ts){
+  const dt=Math.min(0.05,(ts-last)/1000||0); last=ts;
+  // 昼夜補間
+  nightT += (nightTarget-nightT)*Math.min(1,dt*2.2);
+  applyDayNight();
+  if(state===STATE.NIGHT||state===STATE.DAY) update(dt);
+  syncScene(); updateCamera();
+  composer.render();
+  requestAnimationFrame(loop);
+}
+
+addEventListener('resize', ()=>{
+  camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth,innerHeight); composer.setSize(innerWidth,innerHeight);
+});
+
+buildNodes(); updateNodeRings(); updateHud();
+document.getElementById('startGameBtn').onclick = startGame;
+document.getElementById('startNightBtn').onclick = startNight;
+document.getElementById('loading').style.display='none';
+requestAnimationFrame(loop);
+
+// 検証用に公開
+window.dbg = { get state(){return state;}, set state(v){state=v;}, startGame, startNight, get gold(){return gold;}, set gold(v){gold=v;},
+  get nightIndex(){return nightIndex;}, set nightIndex(v){nightIndex=v;}, castle, king, nodes, get enemies(){return enemies;},
+  get spawnQueue(){return spawnQueue;}, BUILDINGS, ENEMIES, doBuild, doUpgrade, doSell, spawnEnemy, setDayNight,
+  camera, renderer, get selectedNode(){return selectedNode;}, set selectedNode(v){selectedNode=v;},
+  get particles(){return particles;}, get projectiles(){return projectiles;},
+  // テスト用: rAFに依存せず手動でnフレーム進める
+  tick:(dt=0.033,n=1)=>{ for(let i=0;i<n;i++){ nightT+=(nightTarget-nightT)*Math.min(1,dt*2.2); applyDayNight(); update(dt); } syncScene(); },
+  scene };
+</script>
+</body>
+</html>

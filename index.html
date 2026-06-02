@@ -120,6 +120,8 @@ import * as THREE from 'three';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 
 /* =========================================================================
    VoiceThrone モック v0.3 — Nordfels 3D ／ 型付きスポット＋壁セグメント＋兵舎
@@ -223,22 +225,48 @@ const camera=new THREE.PerspectiveCamera(34, innerWidth/innerHeight, 0.5, 600);
 const renderer=new THREE.WebGLRenderer({ antialias:true });
 renderer.setPixelRatio(Math.min(2,devicePixelRatio)); renderer.setSize(innerWidth,innerHeight);
 renderer.shadowMap.enabled=true; renderer.shadowMap.type=THREE.PCFSoftShadowMap;
-renderer.toneMapping=THREE.ACESFilmicToneMapping; renderer.toneMappingExposure=1.05;
+renderer.toneMapping=THREE.ACESFilmicToneMapping; renderer.toneMappingExposure=1.1;
 container.appendChild(renderer.domElement);
 
 const composer=new EffectComposer(renderer);
 composer.addPass(new RenderPass(scene,camera));
-const bloom=new UnrealBloomPass(new THREE.Vector2(innerWidth,innerHeight), 0.25, 0.7, 0.85);
+const bloom=new UnrealBloomPass(new THREE.Vector2(innerWidth,innerHeight), 0.32, 0.8, 0.82);
 composer.addPass(bloom);
+// トーンマッピング＋sRGB変換（これが無いと暗く表示される）
+composer.addPass(new OutputPass());
+// 仕上げ: カラーグレーディング＋ビネット（OutputPass後＝表示色空間で処理）
+const GradePass=new ShaderPass({
+  uniforms:{ tDiffuse:{value:null}, contrast:{value:1.05}, sat:{value:1.10}, split:{value:0.10}, vigAmt:{value:0.22}, lift:{value:0.0} },
+  vertexShader:`varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);} `,
+  fragmentShader:`varying vec2 vUv; uniform sampler2D tDiffuse; uniform float contrast; uniform float sat; uniform float split; uniform float vigAmt; uniform float lift;
+    void main(){ vec4 tex=texture2D(tDiffuse,vUv); vec3 col=tex.rgb+lift;
+      col=(col-0.5)*contrast+0.5;
+      float l=dot(col,vec3(0.299,0.587,0.114));
+      col += split*vec3(1.0,0.5,-0.55)*(l-0.5);
+      col=mix(vec3(l),col,sat);
+      float d=length(vUv-0.5); float vg=smoothstep(0.92,0.32,d); vg=mix(1.0,vg,vigAmt);
+      col*=vg;
+      gl_FragColor=vec4(clamp(col,0.0,1.0),tex.a); } ` });
+composer.addPass(GradePass);
 
 const toonRamp=(()=>{ const d=new Uint8Array([90,170,255]); const t=new THREE.DataTexture(d,d.length,1,THREE.RedFormat);
   t.minFilter=t.magFilter=THREE.NearestFilter; t.needsUpdate=true; return t; })();
 function toonMat(color){ return new THREE.MeshToonMaterial({ color, gradientMap:toonRamp }); }
 
-const sun=new THREE.DirectionalLight(0xfff4e0,1.5); sun.position.set(28,46,20); sun.castShadow=true;
-sun.shadow.mapSize.set(2048,2048); Object.assign(sun.shadow.camera,{left:-80,right:80,top:60,bottom:-60,near:1,far:200}); sun.shadow.bias=-0.0005; scene.add(sun);
-const ambient=new THREE.HemisphereLight(0xbfd8f0,0x4a5a3a,0.75); scene.add(ambient);
-scene.background=new THREE.Color(0xcfe6f5); scene.fog=new THREE.Fog(0xcfe6f5,70,175);
+const sun=new THREE.DirectionalLight(0xfff0d6,2.0); sun.position.set(34,50,22); sun.castShadow=true;
+sun.shadow.mapSize.set(2048,2048); Object.assign(sun.shadow.camera,{left:-80,right:80,top:60,bottom:-60,near:1,far:200});
+sun.shadow.bias=-0.0004; sun.shadow.normalBias=0.02; sun.shadow.radius=4; scene.add(sun);
+const ambient=new THREE.HemisphereLight(0xbcd8f2,0x55663e,0.62); scene.add(ambient);
+// 寒色のリムライト（逆光側・影なし）で立体感
+const rim=new THREE.DirectionalLight(0xaecbff,0.5); rim.position.set(-30,16,-26); scene.add(rim);
+scene.fog=new THREE.Fog(0xcfe6f5,82,205);
+// グラデーション天球
+const skyU={ top:{value:new THREE.Color(0x5aa6dc)}, bot:{value:new THREE.Color(0xe2f1f7)}, expo:{value:0.85} };
+const skyDome=new THREE.Mesh(new THREE.SphereGeometry(420,24,16), new THREE.ShaderMaterial({ side:THREE.BackSide, depthWrite:false, fog:false, uniforms:skyU,
+  vertexShader:`varying vec3 vP; void main(){ vP=position; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);} `,
+  fragmentShader:`varying vec3 vP; uniform vec3 top; uniform vec3 bot; uniform float expo;
+    void main(){ float h=pow(clamp(normalize(vP).y*0.5+0.5,0.0,1.0),expo); gl_FragColor=vec4(mix(bot,top,h),1.0);} ` }));
+scene.add(skyDome);
 
 const OUTLINE_MAT=new THREE.MeshBasicMaterial({ color:0x20242a, side:THREE.BackSide });
 function outlined(mesh,k=1.06){ const o=new THREE.Mesh(mesh.geometry, OUTLINE_MAT); o.scale.multiplyScalar(k); mesh.add(o); return mesh; }
@@ -341,6 +369,8 @@ function makeBuildingMesh(type, level, unitKind){ const g=new THREE.Group();
     const fcol=unitKind?UNITS[unitKind].color:0x888888;
     const pole=mk(new THREE.CylinderGeometry(0.05,0.05,1.5,5),0xdddddd,{outline:false}); pole.position.set(0.85,1.6,0.65); g.add(pole);
     const flag=mk(new THREE.BoxGeometry(0.7,0.45,0.05),fcol); flag.position.set(1.15,1.9,0.65); g.add(flag); }
+  // 夜の暖色グロー（灯りの島）
+  const pl=new THREE.PointLight(0xff9a3c, 0, 11, 2); pl.position.y=2.0; g.add(pl); g.userData.light=pl;
   scene.add(g); return g;
 }
 function makeWallMesh(level){ const g=new THREE.Group();
@@ -597,13 +627,16 @@ function syncScene(){
   for(const n of nodes){ const b=n.building; if(b&&b.type==='mill'&&b.mesh&&b.mesh.userData.sails) b.mesh.userData.sails.rotation.z+=0.02; }
 }
 let nightT=0, nightTarget=0; function setDayNight(v){ nightTarget=v; }
-const DAY={ sun:new THREE.Color(0xfff4e0), sunI:1.5, amb:0.75, sky:new THREE.Color(0xcfe6f5), fogN:70, fogF:175, bloom:0.25 };
-const NGT={ sun:new THREE.Color(0x3a4a7a), sunI:0.35, amb:0.32, sky:new THREE.Color(0x16203e), fogN:34, fogF:120, bloom:1.05 };
+const DAY={ sun:new THREE.Color(0xfff0d6), sunI:1.7, amb:0.7, rimI:0.45, skyTop:new THREE.Color(0x5aa6dc), skyBot:new THREE.Color(0xe2f1f7), fogN:82, fogF:205, bloom:0.30 };
+const NGT={ sun:new THREE.Color(0x42548a), sunI:0.30, amb:0.30, rimI:0.18, skyTop:new THREE.Color(0x0c1430), skyBot:new THREE.Color(0x26365a), fogN:40, fogF:135, bloom:1.05 };
 const _c=new THREE.Color();
 function applyDayNight(){ const t=nightT;
-  sun.color.copy(DAY.sun).lerp(NGT.sun,t); sun.intensity=DAY.sunI+(NGT.sunI-DAY.sunI)*t; ambient.intensity=DAY.amb+(NGT.amb-DAY.amb)*t;
-  _c.copy(DAY.sky).lerp(NGT.sky,t); scene.background.copy(_c); scene.fog.color.copy(_c);
-  scene.fog.near=DAY.fogN+(NGT.fogN-DAY.fogN)*t; scene.fog.far=DAY.fogF+(NGT.fogF-DAY.fogF)*t; bloom.strength=DAY.bloom+(NGT.bloom-DAY.bloom)*t; }
+  sun.color.copy(DAY.sun).lerp(NGT.sun,t); sun.intensity=DAY.sunI+(NGT.sunI-DAY.sunI)*t;
+  ambient.intensity=DAY.amb+(NGT.amb-DAY.amb)*t; rim.intensity=DAY.rimI+(NGT.rimI-DAY.rimI)*t;
+  skyU.top.value.copy(DAY.skyTop).lerp(NGT.skyTop,t); skyU.bot.value.copy(DAY.skyBot).lerp(NGT.skyBot,t);
+  _c.copy(DAY.skyBot).lerp(NGT.skyBot,t); scene.fog.color.copy(_c);
+  scene.fog.near=DAY.fogN+(NGT.fogN-DAY.fogN)*t; scene.fog.far=DAY.fogF+(NGT.fogF-DAY.fogF)*t; bloom.strength=DAY.bloom+(NGT.bloom-DAY.bloom)*t;
+  for(const n of nodes){ const b=n.building; if(b&&b.mesh&&b.mesh.userData.light) b.mesh.userData.light.intensity=t*1.8; } }
 function updateCamera(){ const kx=toWX(king.x), kz=toWZ(king.y); camera.position.set(kx,52,kz+38); camera.lookAt(kx,0,kz); }
 
 const warnEls={}; for(const k of ALL_DIRS){ const el=document.createElement('div'); el.className='warn'; el.textContent='⚔'; document.getElementById('wrap').appendChild(el); warnEls[k]=el; }
@@ -675,6 +708,7 @@ window.dbg={ get state(){return state;}, set state(v){state=v;}, startGame, star
   get enemies(){return enemies;}, get friendlies(){return friendlies;}, get spawnQueue(){return spawnQueue;}, get particles(){return particles;}, get projectiles(){return projectiles;},
   doBuild, buildBarracks, doUpgrade, doSell, buildWall, upgradeWall, sellWall, spawnEnemy, setDayNight, scene, camera, renderer,
   get selectedNode(){return selectedNode;}, set selectedNode(v){selectedNode=v;}, get selectedWall(){return selectedWall;}, set selectedWall(v){selectedWall=v;}, select,
+  viz:{ sun, rim, ambient, GradePass, skyU, DAY, NGT, get exposure(){return renderer.toneMappingExposure;}, set exposure(v){renderer.toneMappingExposure=v;} },
   tick:(dt=0.033,n=1)=>{ for(let i=0;i<n;i++){ nightT+=(nightTarget-nightT)*Math.min(1,dt*2.2); applyDayNight(); update(dt); } syncScene(); } };
 </script>
 </body>

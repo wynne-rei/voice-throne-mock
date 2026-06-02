@@ -249,6 +249,19 @@ function mk(geo, color, {cast=true, recv=false, outline=true}={}){
   if (outline) outlined(m);
   return m;
 }
+// 共有ジオメトリ／マテリアル（弾・パーティクルの使い捨てを避ける）
+const PROJ_GEO = new THREE.SphereGeometry(0.13,6,6);
+const PART_GEO = new THREE.SphereGeometry(0.12,5,5);
+const _projMatCache = {};
+function projMat(c){ return _projMatCache[c] || (_projMatCache[c]=new THREE.MeshBasicMaterial({color:c})); }
+// メッシュ破棄（共有ジオメトリ／共有マテリアルは残す）
+function disposeObject(root){
+  root.traverse(o=>{
+    if(o.geometry && o.geometry!==PROJ_GEO && o.geometry!==PART_GEO) o.geometry.dispose();
+    const m=o.material;
+    if(m && m!==OUTLINE_MAT){ Array.isArray(m)?m.forEach(x=>x.dispose()):m.dispose(); }
+  });
+}
 
 // =========================================================================
 //  ワールド（地形・水・木・岩・城・スポーン）
@@ -395,10 +408,9 @@ function makeBuildingMesh(type, level){
 }
 
 // パーティクル（ヒット）
-const pmat = new THREE.MeshBasicMaterial({ color:0xffffff });
 function spawnHitFx(wx,wy,wz,color){
-  for (let i=0;i<6;i++){ const p=new THREE.Mesh(new THREE.SphereGeometry(0.12,5,5), pmat.clone());
-    p.material.color.setHex(color); p.position.set(wx,wy,wz);
+  for (let i=0;i<6;i++){ const p=new THREE.Mesh(PART_GEO, new THREE.MeshBasicMaterial({ color, transparent:true }));
+    p.position.set(wx,wy,wz);
     p.userData = { vx:(Math.random()-0.5)*6, vy:Math.random()*5+1, vz:(Math.random()-0.5)*6, t:0.45 };
     scene.add(p); particles.push(p); }
 }
@@ -413,12 +425,21 @@ canvasEl.addEventListener('pointerdown', (e) => {
   if (state !== STATE.DAY) return;
   ndc.x = (e.clientX/innerWidth)*2-1; ndc.y = -(e.clientY/innerHeight)*2+1;
   raycaster.setFromCamera(ndc, camera);
-  const hit = raycaster.intersectObject(ground, false)[0];
-  if (!hit) return;
-  const x2 = fromWX(hit.point.x), y2 = fromWZ(hit.point.z);
-  let best=null, bd=30;
-  for (const n of nodes){ const d=Math.hypot(n.x-x2,n.y-y2); if(d<bd){bd=d;best=n;} }
-  selectedNode = best; renderBuildBar(); updateNodeRings();
+  // 建物（立体）も判定対象に含める。建物に当たればそのノードを直接選択
+  const targets = [ground];
+  for (const n of nodes) if (n.building && n.building.mesh) targets.push(n.building.mesh);
+  const hit = raycaster.intersectObjects(targets, true)[0];
+  if (!hit) { selectedNode=null; renderBuildBar(); updateNodeRings(); return; }
+  let obj = hit.object, node = null;
+  while (obj){ if (obj.userData && obj.userData.node){ node = obj.userData.node; break; } obj = obj.parent; }
+  if (!node){
+    // 地面ヒット → 近傍ノード（空きノード建設用）
+    const x2 = fromWX(hit.point.x), y2 = fromWZ(hit.point.z);
+    let best=null, bd=42;
+    for (const n of nodes){ const d=Math.hypot(n.x-x2,n.y-y2); if(d<bd){bd=d;best=n;} }
+    node = best;
+  }
+  selectedNode = node; renderBuildBar(); updateNodeRings();
 });
 
 function renderBuildBar(){
@@ -447,22 +468,29 @@ function descOf(type,lv){ const L=BUILDINGS[type].levels[lv];
   if(type==='house')return `毎朝 +${L.income}G`; if(type==='tower')return `攻撃${L.dmg}・射程${L.range}`; if(type==='wall')return `HP${L.hp}の盾`; return ''; }
 
 function doBuild(type){
-  const b=BUILDINGS[type]; if(gold<b.cost||selectedNode.building) return;
+  if(!selectedNode || selectedNode.building) return;
+  const b=BUILDINGS[type];
+  if(gold<b.cost){ toast('ゴールドが足りない'); return; }
   gold-=b.cost; const L=b.levels[0];
   const bd = { type, level:0, hp:(L.hp||0), maxHp:(L.hp||0), cd:0, x:selectedNode.x, y:selectedNode.y, mesh:null };
-  bd.mesh = makeBuildingMesh(type,0); bd.mesh.position.set(toWX(bd.x),0,toWZ(bd.y));
+  bd.mesh = makeBuildingMesh(type,0); bd.mesh.position.set(toWX(bd.x),0,toWZ(bd.y)); bd.mesh.userData.node = selectedNode;
   selectedNode.building = bd; toast(`${b.name}を建設`); updateHud(); renderBuildBar(); updateNodeRings();
 }
 function doUpgrade(){
-  const bd=selectedNode.building, b=BUILDINGS[bd.type]; const next=b.levels[bd.level+1];
-  if(!next||gold<next.upCost) return; gold-=next.upCost; bd.level++;
+  const node=selectedNode; if(!node||!node.building) return;
+  const bd=node.building, b=BUILDINGS[bd.type]; const next=b.levels[bd.level+1];
+  if(!next){ toast('最大強化です'); return; }
+  if(gold<next.upCost){ toast('ゴールドが足りない'); return; }
+  gold-=next.upCost; bd.level++;
   if(next.hp){ bd.maxHp=next.hp; bd.hp=next.hp; }
-  if(bd.mesh){ scene.remove(bd.mesh); bd.mesh=makeBuildingMesh(bd.type,bd.level); bd.mesh.position.set(toWX(bd.x),0,toWZ(bd.y)); }
+  if(bd.mesh){ scene.remove(bd.mesh); disposeObject(bd.mesh);
+    bd.mesh=makeBuildingMesh(bd.type,bd.level); bd.mesh.position.set(toWX(bd.x),0,toWZ(bd.y)); bd.mesh.userData.node=node; }
   toast(`${b.name}を強化 Lv${bd.level+1}`); updateHud(); renderBuildBar();
 }
 function doSell(){
-  const bd=selectedNode.building, b=BUILDINGS[bd.type]; gold+=Math.ceil(b.cost/2);
-  if(bd.mesh) scene.remove(bd.mesh); selectedNode.building=null;
+  const node=selectedNode; if(!node||!node.building) return;
+  const bd=node.building, b=BUILDINGS[bd.type]; gold+=Math.ceil(b.cost/2);
+  if(bd.mesh){ scene.remove(bd.mesh); disposeObject(bd.mesh); } node.building=null;
   toast('撤去'); updateHud(); renderBuildBar(); updateNodeRings();
 }
 
@@ -530,7 +558,7 @@ function damageKing(dmg){ if(king.downed>0) return; king.hp-=dmg; king.flash=0.1
   if(king.hp<=0){ king.hp=0; king.downed=3.0; toast('王がダウン！城へ復帰中'); } }
 
 function fireArrow(x,y,target,dmg,color){
-  const m=new THREE.Mesh(new THREE.SphereGeometry(0.13,6,6), new THREE.MeshBasicMaterial({color}));
+  const m=new THREE.Mesh(PROJ_GEO, projMat(color));
   m.position.set(toWX(x),1.0,toWZ(y)); scene.add(m);
   projectiles.push({ x,y,target,dmg,color,speed:420,dead:false,mesh:m });
 }
@@ -590,12 +618,12 @@ function updateEnemies(dt){
     }
   }
   enemies = enemies.filter(e=>{
-    if(e.hp<=0){ gold+=e.def.gold; if(e.mesh){ spawnHitFx(e.mesh.position.x,0.6,e.mesh.position.z, ENEMY_COLOR[e.type]||ENEMY_COLOR.base); scene.remove(e.mesh); } return false; }
+    if(e.hp<=0){ gold+=e.def.gold; if(e.mesh){ spawnHitFx(e.mesh.position.x,0.6,e.mesh.position.z, ENEMY_COLOR[e.type]||ENEMY_COLOR.base); scene.remove(e.mesh); disposeObject(e.mesh); } return false; }
     return true;
   });
 }
 function removeBuilding(b){
-  for(const n of nodes) if(n.building===b){ if(b.mesh) scene.remove(b.mesh); n.building=null;
+  for(const n of nodes) if(n.building===b){ if(b.mesh){ scene.remove(b.mesh); disposeObject(b.mesh); } n.building=null;
     if(selectedNode===n) renderBuildBar(); updateNodeRings(); }
 }
 function updateTowers(dt){
@@ -616,7 +644,7 @@ function updateParticles(dt){
   for(const p of particles){ const u=p.userData; u.t-=dt; u.vy-=14*dt;
     p.position.x+=u.vx*dt; p.position.y+=u.vy*dt; p.position.z+=u.vz*dt;
     p.material.opacity=Math.max(0,u.t*2.2); p.material.transparent=true; }
-  particles = particles.filter(p=>{ if(p.userData.t<=0){ scene.remove(p); return false; } return true; });
+  particles = particles.filter(p=>{ if(p.userData.t<=0){ scene.remove(p); p.material.dispose(); return false; } return true; });
 }
 
 // =========================================================================
@@ -664,10 +692,8 @@ for(const k of ALL_DIRS){ const el=document.createElement('div'); el.className='
 const _v = new THREE.Vector3();
 function updateWarnIcons(){
   const activeDirs = new Set();
-  if(state===STATE.NIGHT){ for(const e of enemies) for(const k of ALL_DIRS){
-      // ざっくり：敵が居る側を点灯
-    }
-    // スポーン地点ごとに近い敵が居れば点灯
+  if(state===STATE.NIGHT){
+    // スポーン地点ごとに、近くに敵が居る or まだ湧く予定があれば点灯
     for(const k of ALL_DIRS){ const s=SPAWNS[k];
       if(enemies.some(e=>Math.hypot(e.x-s.x,e.y-s.y)<260) || spawnQueue.some(q=>q.dir===k)) activeDirs.add(k); }
   }
@@ -709,10 +735,10 @@ function startGame(){
   hideOverlay(); state=STATE.DAY; nightIndex=0; gold=12;
   castle.hp=castle.maxHp; king.hp=king.maxHp; king.x=480; king.y=370;
   // 残存エンティティ掃除
-  for(const e of enemies) if(e.mesh) scene.remove(e.mesh);
+  for(const e of enemies) if(e.mesh){ scene.remove(e.mesh); disposeObject(e.mesh); }
   for(const p of projectiles) if(p.mesh) scene.remove(p.mesh);
-  for(const p of particles) scene.remove(p);
-  for(const n of nodes) if(n.building&&n.building.mesh){ scene.remove(n.building.mesh); n.building=null; }
+  for(const p of particles){ scene.remove(p); p.material.dispose(); }
+  for(const n of nodes) if(n.building&&n.building.mesh){ scene.remove(n.building.mesh); disposeObject(n.building.mesh); n.building=null; }
   enemies=[]; projectiles=[]; particles=[]; spawnQueue=[];
   document.getElementById('startNightBtn').style.display='';
   setDayNight(0); nightT=0; updateNodeRings();
@@ -745,7 +771,12 @@ requestAnimationFrame(loop);
 // 検証用に公開
 window.dbg = { get state(){return state;}, set state(v){state=v;}, startGame, startNight, get gold(){return gold;}, set gold(v){gold=v;},
   get nightIndex(){return nightIndex;}, set nightIndex(v){nightIndex=v;}, castle, king, nodes, get enemies(){return enemies;},
-  get spawnQueue(){return spawnQueue;}, BUILDINGS, ENEMIES, doBuild, spawnEnemy, setDayNight, get selectedNode(){return selectedNode;}, set selectedNode(v){selectedNode=v;} };
+  get spawnQueue(){return spawnQueue;}, BUILDINGS, ENEMIES, doBuild, doUpgrade, doSell, spawnEnemy, setDayNight,
+  camera, renderer, get selectedNode(){return selectedNode;}, set selectedNode(v){selectedNode=v;},
+  get particles(){return particles;}, get projectiles(){return projectiles;},
+  // テスト用: rAFに依存せず手動でnフレーム進める
+  tick:(dt=0.033,n=1)=>{ for(let i=0;i<n;i++){ nightT+=(nightTarget-nightT)*Math.min(1,dt*2.2); applyDayNight(); update(dt); } syncScene(); },
+  scene };
 </script>
 </body>
 </html>

@@ -58,6 +58,10 @@
     border: 2px solid #ff5a5a; color: #ff8a8a; display: flex; align-items: center; justify-content: center;
     font-size: 12px; background: #2a0e0e88; pointer-events: none; opacity: 0; transition: opacity .3s; }
   #loading { position:absolute; inset:0; z-index:20; display:flex; align-items:center; justify-content:center; background:#0c1014; color:#8aa0b4; font-size:14px; }
+  @keyframes floatUp { 0%{ transform:translate(-50%,0) scale(.6); opacity:0; } 15%{ opacity:1; transform:translate(-50%,-6px) scale(1.15);} 100%{ transform:translate(-50%,-46px) scale(1); opacity:0; } }
+  .gfloat { position:absolute; z-index:4; color:#ffd45e; font-weight:800; font-size:15px; text-shadow:0 1px 3px #000b; pointer-events:none; animation:floatUp .85s ease-out forwards; white-space:nowrap; }
+  @keyframes goldPulse { 0%{ transform:scale(1);} 40%{ transform:scale(1.4); color:#fff;} 100%{ transform:scale(1);} }
+  .gpulse { animation:goldPulse .35s ease-out; display:inline-block; }
 </style>
 </head>
 <body>
@@ -171,13 +175,13 @@ const UNITS = {
 const MELEE_UNITS = ['knight','spearman','flail','berserk'];
 
 const ENEMIES = {
-  swordsman:{ jp:'剣士',  r:7, hp:9,  speed:30, dmgCastle:4,  dmgStruct:6,  atkRange:16, atkInt:0.8, gold:1, target:'castle' },
-  archer:   { jp:'弓兵',  r:7, hp:14, speed:26, dmgCastle:3,  dmgStruct:2,  atkRange:120,atkInt:1.0, gold:1, target:'castle', ranged:true },
-  ogre:     { jp:'オーガ',r:14,hp:200,speed:22, dmgCastle:20, dmgStruct:24, atkRange:22, atkInt:1.0, gold:5, target:'castle' },
-  racer:    { jp:'レーサー',r:6,hp:35, speed:78, dmgCastle:18, dmgStruct:5,  atkRange:14, atkInt:0.5, gold:2, target:'castle', wallOnly:true },
-  wasp:     { jp:'ワスプ',r:6, hp:25, speed:60, dmgCastle:6,  dmgStruct:6,  atkRange:60, atkInt:0.7, gold:2, target:'castle', flying:true, ranged:true },
-  hunterling:{jp:'ハンターリング',r:7,hp:30,speed:34,dmgCastle:8,dmgStruct:8, atkRange:18, atkInt:0.8, gold:2, target:'king' },
-  catapult: { jp:'カタパルト',r:13,hp:45,speed:16,dmgCastle:60,dmgStruct:150,atkRange:150,atkInt:2.2, gold:4, target:'castle', ranged:true, siege:true },
+  swordsman:{ jp:'剣士',  r:7, hp:9,  speed:40, dmgCastle:4,  dmgStruct:6,  atkRange:16, atkInt:0.8, gold:1, target:'castle' },
+  archer:   { jp:'弓兵',  r:7, hp:14, speed:34, dmgCastle:3,  dmgStruct:2,  atkRange:120,atkInt:1.0, gold:1, target:'castle', ranged:true },
+  ogre:     { jp:'オーガ',r:14,hp:200,speed:28, dmgCastle:20, dmgStruct:24, atkRange:22, atkInt:1.0, gold:5, target:'castle' },
+  racer:    { jp:'レーサー',r:6,hp:35, speed:95, dmgCastle:18, dmgStruct:5,  atkRange:14, atkInt:0.5, gold:2, target:'castle', wallOnly:true },
+  wasp:     { jp:'ワスプ',r:6, hp:25, speed:74, dmgCastle:6,  dmgStruct:6,  atkRange:60, atkInt:0.7, gold:2, target:'castle', flying:true, ranged:true },
+  hunterling:{jp:'ハンターリング',r:7,hp:30,speed:46,dmgCastle:8,dmgStruct:8, atkRange:18, atkInt:0.8, gold:2, target:'king' },
+  catapult: { jp:'カタパルト',r:13,hp:45,speed:22,dmgCastle:60,dmgStruct:150,atkRange:150,atkInt:2.2, gold:4, target:'castle', ranged:true, siege:true },
 };
 const ENEMY_COLOR = { base:0xd63a36, hunterling:0xff5fa0, racer:0xe0683a, wasp:0xc0463a, ogre:0xb03030, catapult:0x9a3a2a, archer:0xcf5a3a };
 
@@ -405,11 +409,19 @@ function makeCharMesh(modelKey, height){ const g=new THREE.Group(); const src=MO
     if(clips){ const mx=new THREE.AnimationMixer(m);
       const ci=clips.find(c=>c.name==='Idle')||clips.find(c=>/idle/i.test(c.name));
       const cw=clips.find(c=>c.name==='Walking_A')||clips.find(c=>c.name==='Running_A')||clips.find(c=>/walk|run/i.test(c.name));
-      const ai=ci?mx.clipAction(ci):null, aw=cw?mx.clipAction(cw):null; if(ai) ai.play();
-      g.userData.mixer=mx; g.userData.ai=ai; g.userData.aw=aw; g.userData.anim='idle'; } }
+      const ca=clips.find(c=>['1H_Melee_Attack_Slice_Diagonal','1H_Melee_Attack_Chop','2H_Melee_Attack_Chop','Spellcast_Shoot','1H_Ranged_Shoot'].includes(c.name))||clips.find(c=>/attack|shoot|spellcast/i.test(c.name));
+      const ai=ci?mx.clipAction(ci):null, aw=cw?mx.clipAction(cw):null, aa=ca?mx.clipAction(ca):null; if(ai) ai.play();
+      g.userData.mixer=mx; g.userData.ai=ai; g.userData.aw=aw; g.userData.aa=aa; g.userData.anim='idle'; g.userData.atkLock=0; g.userData.lastMoving=false; } }
   return g; }
-function setCharWalk(g, moving){ const u=g.userData; if(!u.mixer) return; const want=moving?'walk':'idle'; if(u.anim===want) return; u.anim=want;
+function setCharWalk(g, moving){ const u=g.userData; if(!u.mixer) return; u.lastMoving=moving; if(u.atkLock>0) return;
+  const want=moving?'walk':'idle'; if(u.anim===want) return; u.anim=want;
   const to=moving?u.aw:u.ai, from=moving?u.ai:u.aw; if(to){ to.reset().fadeIn(0.18).play(); } if(from){ from.fadeOut(0.18); } }
+function playAttack(g){ if(!g) return; const u=g.userData; if(!u.mixer||!u.aa||u.atkLock>0) return;
+  const cur=u.anim==='walk'?u.aw:u.ai; if(cur) cur.fadeOut(0.06);
+  u.aa.reset(); u.aa.setLoop(THREE.LoopOnce,1); u.aa.clampWhenFinished=false; u.aa.timeScale=1.3; u.aa.fadeIn(0.04).play();
+  u.atkLock=0.5; u.anim='attack'; }
+function tickChar(g,dt){ const u=g.userData; if(!u.mixer) return; u.mixer.update(dt);
+  if(u.atkLock>0){ u.atkLock-=dt; if(u.atkLock<=0){ u.anim=''; setCharWalk(g,u.lastMoving); } } }
 const ALLY_MODEL={ knight:'Knight', spearman:'Knight', flail:'Barbarian', berserk:'Barbarian', archer:'Rogue' };
 const ALLY_H={ knight:2.5, spearman:2.5, flail:2.6, berserk:2.4, archer:2.4 };
 const ENEMY_MODEL={ swordsman:'Skeleton_Warrior', archer:'Skeleton_Rogue', ogre:'Skeleton_Warrior', racer:'Skeleton_Minion', wasp:'Skeleton_Mage', hunterling:'Skeleton_Rogue', catapult:'Skeleton_Warrior' };
@@ -425,6 +437,9 @@ function setupModelEntities(){
 
 function spawnHitFx(wx,wy,wz,color){ for(let i=0;i<6;i++){ const p=new THREE.Mesh(PART_GEO,new THREE.MeshBasicMaterial({color,transparent:true}));
   p.position.set(wx,wy,wz); p.userData={vx:(Math.random()-0.5)*6,vy:Math.random()*5+1,vz:(Math.random()-0.5)*6,t:0.45}; scene.add(p); particles.push(p); } }
+function buildPuff(x,y){ const wx=toWX(x), wz=toWZ(y); for(let i=0;i<12;i++){ const p=new THREE.Mesh(PART_GEO,new THREE.MeshBasicMaterial({color:0xe8dcc0,transparent:true}));
+  const a=Math.random()*Math.PI*2, r=Math.random()*1.3; p.position.set(wx+Math.cos(a)*r,0.3,wz+Math.sin(a)*r);
+  p.userData={vx:Math.cos(a)*2.5,vy:Math.random()*2+1.5,vz:Math.sin(a)*2.5,t:0.55}; scene.add(p); particles.push(p); } }
 
 // =========================================================================
 //  入力（クリックでスポット/壁を選択）
@@ -510,12 +525,14 @@ function doBuild(type){ const n=selectedNode; if(!n||n.building) return; const b
   if(gold<b.cost){ toast('ゴールドが足りない'); return; } gold-=b.cost; const L=b.levels[0];
   const bd={ type, level:0, r:b.r, hp:(L.hp||0), maxHp:(L.hp||0), cd:0, x:n.x, y:n.y, mesh:null };
   bd.mesh=makeBuildingMesh(type,0); bd.mesh.position.set(toWX(bd.x),0,toWZ(bd.y)); bd.mesh.userData.node=n;
+  bd.mesh.scale.setScalar(0.35); bd.popAt=gameTime; buildPuff(bd.x,bd.y);
   n.building=bd; toast(`${b.name}を建設`); afterBuild();
 }
 function buildBarracks(kind){ const n=selectedNode; if(!n||n.building) return; const b=BUILDINGS.barracks;
   if(gold<b.cost){ toast('ゴールドが足りない'); return; } gold-=b.cost; const L=b.levels[0];
   const bd={ type:'barracks', unit:kind, level:0, r:b.r, hp:L.hp, maxHp:L.hp, cd:0, x:n.x, y:n.y, mesh:null, units:[] };
   bd.mesh=makeBuildingMesh('barracks',0,kind); bd.mesh.position.set(toWX(bd.x),0,toWZ(bd.y)); bd.mesh.userData.node=n;
+  bd.mesh.scale.setScalar(0.35); bd.popAt=gameTime; buildPuff(bd.x,bd.y);
   n.building=bd; spawnSquad(bd); toast(`${UNITS[kind].jp}兵舎を建設`); afterBuild();
 }
 function doUpgrade(){ const n=selectedNode; if(!n||!n.building) return; const b=n.building, def=BUILDINGS[b.type];
@@ -536,7 +553,7 @@ function afterBuild(){ updateHud(); renderBuildBar(); updateNodeRings(); }
 // ===== 壁スロット =====
 function buildWall(){ const w=selectedWall; if(!w||w.built) return; if(gold<WALLDEF.cost){ toast('ゴールドが足りない'); return; }
   gold-=WALLDEF.cost; w.built=true; w.level=0; w.maxHp=WALLDEF.levels[0].hp; w.hp=w.maxHp;
-  w.mesh=makeWallMesh(0); w.mesh.position.set(toWX(w.x),0,toWZ(w.y)); w.mesh.userData.wall=w; toast('壁を建設'); afterBuild(); }
+  w.mesh=makeWallMesh(0); w.mesh.position.set(toWX(w.x),0,toWZ(w.y)); w.mesh.userData.wall=w; w.mesh.scale.setScalar(0.4); w.popAt=gameTime; buildPuff(w.x,w.y); toast('壁を建設'); afterBuild(); }
 function upgradeWall(){ const w=selectedWall; if(!w||!w.built) return; const next=WALLDEF.levels[w.level+1];
   if(!next){ toast('最大強化です'); return; } if(gold<next.upCost){ toast('ゴールドが足りない'); return; }
   gold-=next.upCost; w.level++; w.maxHp=next.hp; w.hp=next.hp;
@@ -580,7 +597,7 @@ function nightCleared(){ let income=0;
 // =========================================================================
 //  攻撃
 // =========================================================================
-function tryDagger(){ if(state!==STATE.NIGHT||king.downed>0||king.daggerCd>0) return; king.daggerCd=king.daggerMax; king.flash=0.2; let hit=0;
+function tryDagger(){ if(state!==STATE.NIGHT||king.downed>0||king.daggerCd>0) return; king.daggerCd=king.daggerMax; king.flash=0.2; playAttack(kingGroup); let hit=0;
   for(const e of enemies) if(Math.hypot(e.x-king.x,e.y-king.y)<=king.daggerRange+e.def.r){ damageEnemy(e,king.daggerDmg); hit++; }
   spawnHitFx(toWX(king.x),1.2,toWZ(king.y),0xffffff); if(!hit) toast('短剣（空振り）'); }
 function damageEnemy(e,dmg){ e.hp-=dmg; e.flash=0.12; }
@@ -600,10 +617,10 @@ function update(dt){ updateKing(dt);
     if(!spawnQueue.length && enemies.length===0) nightCleared();
   }
   updateProjectiles(dt); updateParticles(dt); updateHud(); updateWarnIcons();
-  // キャラのアニメmixer更新
-  for(const e of enemies){ const mx=e.mesh&&e.mesh.userData.mixer; if(mx) mx.update(dt); }
-  for(const u of friendlies){ const mx=u.mesh&&u.mesh.userData.mixer; if(mx) mx.update(dt); }
-  if(kingGroup.userData.mixer) kingGroup.userData.mixer.update(dt); }
+  // キャラのアニメmixer更新（攻撃ロック対応）
+  for(const e of enemies){ if(e.mesh) tickChar(e.mesh,dt); }
+  for(const u of friendlies){ if(u.mesh) tickChar(u.mesh,dt); }
+  tickChar(kingGroup,dt); }
 
 function updateKing(dt){
   if(king.downed>0){ king.moving=false; king.downed-=dt; king.x+=(castle.x-king.x)*Math.min(1,dt*4); king.y+=((castle.y+60)-king.y)*Math.min(1,dt*4); if(king.downed<=0) king.hp=king.maxHp; }
@@ -612,7 +629,7 @@ function updateKing(dt){
     king.x=clamp(king.x,30,930); king.y=clamp(king.y,30,564); }
   king.flash=Math.max(0,king.flash-dt); if(king.daggerCd>0) king.daggerCd-=dt;
   if(state===STATE.DAY && king.hp<king.maxHp) king.hp=Math.min(king.maxHp,king.hp+30*dt);
-  if(state===STATE.NIGHT && king.downed<=0){ king.bowCd-=dt; if(king.bowCd<=0){ const t=nearestEnemy(king.x,king.y,king.bowRange); if(t){ fireArrow(king.x,king.y,t,king.bowDmg,0xffe28a); king.bowCd=king.bowInterval; } } }
+  if(state===STATE.NIGHT && king.downed<=0){ king.bowCd-=dt; if(king.bowCd<=0){ const t=nearestEnemy(king.x,king.y,king.bowRange); if(t){ fireArrow(king.x,king.y,t,king.bowDmg,0xffe28a); king.bowCd=king.bowInterval; playAttack(kingGroup); } } }
 }
 function nearestStructure(e){ const def=e.def; let blocker=null,bdist=1e9;
   for(const w of wallSlots){ if(!w.built) continue; const d=Math.hypot(w.x-e.x,w.y-e.y); const reach=def.r+w.r+def.atkRange*0.4; if(d<reach&&d<bdist){bdist=d;blocker=w;} }
@@ -627,10 +644,10 @@ function updateEnemies(dt){
     const {blocker,bdist}=def.flying?{blocker:null,bdist:1e9}:nearestStructure(e);
     const dCastle=Math.hypot(castle.x-e.x,castle.y-e.y), castleReach=def.r+castle.r+(def.ranged?def.atkRange:6);
     let kingReach=(e.target==='king'&&king.downed<=0&&Math.hypot(king.x-e.x,king.y-e.y)<=def.r+king.r+def.atkRange*0.5);
-    if(foe && fod<=foeReach){ if(e.mesh) e.mesh.rotation.y=Math.atan2(foe.x-e.x,foe.y-e.y); if(e.cd<=0){ damageFriendly(foe,def.dmgStruct); e.cd=def.atkInt; e.atkAnim=0.22; e.flash=0.08; } }
-    else if(kingReach){ if(e.mesh) e.mesh.rotation.y=Math.atan2(king.x-e.x,king.y-e.y); if(e.cd<=0){ damageKing(def.dmgCastle); e.cd=def.atkInt; e.atkAnim=0.22; } }
-    else if(e.target!=='king'&&dCastle<=castleReach){ if(e.mesh) e.mesh.rotation.y=Math.atan2(castle.x-e.x,castle.y-e.y); if(e.cd<=0){ damageCastle(def.dmgCastle); e.cd=def.atkInt; e.atkAnim=0.22; e.flash=0.1; } }
-    else if(blocker&&bdist<=def.r+blocker.r+(def.ranged?def.atkRange:8)){ if(e.mesh) e.mesh.rotation.y=Math.atan2(blocker.x-e.x,blocker.y-e.y); if(e.cd<=0){ blocker.hp-=def.dmgStruct; e.cd=def.atkInt; e.atkAnim=0.22; if(blocker.hp<=0) removeStructure(blocker); } }
+    if(foe && fod<=foeReach){ if(e.mesh) e.mesh.rotation.y=Math.atan2(foe.x-e.x,foe.y-e.y); if(e.cd<=0){ damageFriendly(foe,def.dmgStruct); e.cd=def.atkInt; e.atkAnim=0.22; playAttack(e.mesh); e.flash=0.08; } }
+    else if(kingReach){ if(e.mesh) e.mesh.rotation.y=Math.atan2(king.x-e.x,king.y-e.y); if(e.cd<=0){ damageKing(def.dmgCastle); e.cd=def.atkInt; e.atkAnim=0.22; playAttack(e.mesh); } }
+    else if(e.target!=='king'&&dCastle<=castleReach){ if(e.mesh) e.mesh.rotation.y=Math.atan2(castle.x-e.x,castle.y-e.y); if(e.cd<=0){ damageCastle(def.dmgCastle); e.cd=def.atkInt; e.atkAnim=0.22; playAttack(e.mesh); e.flash=0.1; } }
+    else if(blocker&&bdist<=def.r+blocker.r+(def.ranged?def.atkRange:8)){ if(e.mesh) e.mesh.rotation.y=Math.atan2(blocker.x-e.x,blocker.y-e.y); if(e.cd<=0){ blocker.hp-=def.dmgStruct; e.cd=def.atkInt; e.atkAnim=0.22; playAttack(e.mesh); if(blocker.hp<=0) removeStructure(blocker); } }
     else { // 前進。近い味方が居れば寄る（交戦のため）
       e.moving=true;
       let gx=tx, gy=ty; if(foe && fod<150 && !def.wallOnly){ gx=foe.x; gy=foe.y; }
@@ -638,13 +655,13 @@ function updateEnemies(dt){
       if(blocker){ const wx=blocker.x-e.x, wy=blocker.y-e.y; ax+=-wy*0.012; ay+=wx*0.012; const l2=Math.hypot(ax,ay)||1; ax/=l2; ay/=l2; }
       e.x+=ax*def.speed*dt; e.y+=ay*def.speed*dt; if(e.mesh) e.mesh.rotation.y=Math.atan2(ax,ay); }
   }
-  enemies=enemies.filter(e=>{ if(e.hp<=0){ gold+=e.def.gold; if(e.mesh){ spawnHitFx(e.mesh.position.x,0.6,e.mesh.position.z,ENEMY_COLOR[e.type]||ENEMY_COLOR.base); scene.remove(e.mesh); disposeObject(e.mesh); } return false; } return true; });
+  enemies=enemies.filter(e=>{ if(e.hp<=0){ gold+=e.def.gold; goldFloat(toWX(e.x),toWZ(e.y),e.def.gold); if(e.mesh){ spawnHitFx(e.mesh.position.x,0.6,e.mesh.position.z,ENEMY_COLOR[e.type]||ENEMY_COLOR.base); scene.remove(e.mesh); disposeObject(e.mesh); } return false; } return true; });
 }
 function updateFriendlies(dt){
   for(const u of friendlies){ u.flash=Math.max(0,u.flash-dt); if(u.cd>0) u.cd-=dt; if(u.atkAnim>0)u.atkAnim-=dt; if(u.spawnT>0)u.spawnT-=dt; u.moving=false; const def=u.def;
-    const aggro=def.ranged?def.range:150; const tgt=nearestEnemy(u.x,u.y,aggro);
+    const aggro=def.ranged?Math.max(def.range,150):210; const tgt=nearestEnemy(u.x,u.y,aggro);
     if(tgt){ const d=Math.hypot(tgt.x-u.x,tgt.y-u.y); u.dir=Math.atan2(tgt.x-u.x,tgt.y-u.y);
-      if(d<=def.range){ if(u.cd<=0){ if(def.ranged) fireArrow(u.x,u.y,tgt,def.dmg,0x9fe0ff); else damageEnemy(tgt,def.dmg); u.cd=def.atkInt; u.atkAnim=0.2; } }
+      if(d<=def.range){ if(u.cd<=0){ if(def.ranged) fireArrow(u.x,u.y,tgt,def.dmg,0x9fe0ff); else damageEnemy(tgt,def.dmg); u.cd=def.atkInt; u.atkAnim=0.2; playAttack(u.mesh); } }
       else { const ax=(tgt.x-u.x)/d, ay=(tgt.y-u.y)/d; u.x+=ax*def.speed*dt; u.y+=ay*def.speed*dt; u.moving=true; } }
     else { const dx=u.homeX-u.x, dy=u.homeY-u.y, d=Math.hypot(dx,dy); if(d>6){ u.x+=dx/d*def.speed*dt; u.y+=dy/d*def.speed*dt; u.dir=Math.atan2(dx/d,dy/d); u.moving=true; } }
   }
@@ -709,7 +726,8 @@ function syncScene(){
     let sc=u.baseScale; if(u.spawnT>0) sc*=1-(u.spawnT/0.22)*0.6; if(u.flash>0) sc*=1+u.flash*0.5; m.scale.setScalar(sc);
     setCharWalk(m, u.moving); }
   // ミルの羽／城の旗／水のゆらぎ
-  for(const n of nodes){ const b=n.building; if(b&&b.type==='mill'&&b.mesh&&b.mesh.userData.sails) b.mesh.userData.sails.rotation.z+=0.03; }
+  for(const n of nodes){ const b=n.building; if(b&&b.mesh&&b.popAt!==undefined&&b.mesh.scale.x<1){ const p=Math.min(1,(gameTime-b.popAt)/0.32); b.mesh.scale.setScalar(p>=1?1:0.35+0.65*(p*p*(3-2*p))); } }
+  for(const w of wallSlots){ if(w.built&&w.mesh&&w.popAt!==undefined&&w.mesh.scale.x<1){ const p=Math.min(1,(gameTime-w.popAt)/0.32); w.mesh.scale.setScalar(p>=1?1:0.4+0.6*(p*p*(3-2*p))); } }
   if(castleGroup.userData.flag) castleGroup.userData.flag.rotation.y=Math.sin(gameTime*4)*0.35;
   water.position.y=-0.6+Math.sin(gameTime*0.7)*0.06;
   drawHpBars();
@@ -761,8 +779,17 @@ function updateNodeRings(){
 // =========================================================================
 //  HUD / オーバーレイ
 // =========================================================================
+// コイン獲得フロート（撃破時に+Nがふわっと上がる）
+const _gf=new THREE.Vector3(); let _gfActive=0;
+function goldFloat(wx,wz,amount){ if(_gfActive>26) return; _gf.set(wx,1.3,wz).project(camera); if(_gf.z>1) return;
+  const sx=(_gf.x*0.5+0.5)*innerWidth, sy=(-_gf.y*0.5+0.5)*innerHeight;
+  const d=document.createElement('div'); d.className='gfloat'; d.textContent='＋'+amount; d.style.left=sx+'px'; d.style.top=sy+'px';
+  document.getElementById('wrap').appendChild(d); _gfActive++; setTimeout(()=>{ d.remove(); _gfActive--; }, 850); }
+let _lastGold=14;
 function updateHud(){ document.getElementById('hudNight').textContent=nightIndex?`${nightIndex}/${TOTAL_NIGHTS}`:`0/${TOTAL_NIGHTS}`;
-  document.getElementById('hudGold').textContent=Math.floor(gold); document.getElementById('hudCastle').textContent=Math.ceil(castle.hp);
+  const gEl=document.getElementById('hudGold'), gv=Math.floor(gold); gEl.textContent=gv;
+  if(gv>_lastGold){ gEl.classList.remove('gpulse'); void gEl.offsetWidth; gEl.classList.add('gpulse'); } _lastGold=gv;
+  document.getElementById('hudCastle').textContent=Math.ceil(castle.hp);
   document.getElementById('hudKing').textContent=Math.ceil(king.hp); document.getElementById('hudAlly').textContent=friendlies.length;
   document.getElementById('hudEnemies').textContent=state===STATE.NIGHT?(enemies.length+spawnQueue.length):'—'; }
 let toastT; function toast(msg){ const el=document.getElementById('toast'); el.textContent=msg; el.style.opacity=1; clearTimeout(toastT); toastT=setTimeout(()=>el.style.opacity=0,1900); }

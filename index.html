@@ -122,6 +122,7 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 /* =========================================================================
    VoiceThrone モック v0.3 — Nordfels 3D ／ 型付きスポット＋壁セグメント＋兵舎
@@ -372,31 +373,45 @@ function makeFriendlyMesh(kind){ const def=UNITS[kind], g=new THREE.Group(), col
   else { const sw=mk(new THREE.BoxGeometry(0.08,0.6,0.08),0xdfdfdf,{outline:false}); sw.position.set(0.32,0.9,0); g.add(sw); }
   tagBody(g,body,col); groundBlob(g,0.5); teamRing(g, allyRingMat); scene.add(g); return g;
 }
-const BCOL={ houseWall:0xe0c89a, houseRoof:0xb5562e, stone:0x8a8a8a, stoneDark:0x6f6f6f, wood:0x7a6a52, woodDark:0x5a4a38, mill:0xb9925a };
+// ===== KayKit 3Dモデル読み込み（CC0・中世低ポリ） =====
+const MODELS={};
+const _gltfLoader=new GLTFLoader();
+function _loadGLTF(url){ return new Promise((res,rej)=>_gltfLoader.load(url, g=>res(g), undefined, rej)); }
+const MODEL_FILES={
+  house:'assets/kaykit/blue/building_home_A_blue.gltf',
+  barracks:'assets/kaykit/blue/building_barracks_blue.gltf',
+  archery:'assets/kaykit/blue/building_archeryrange_blue.gltf',
+  tower:'assets/kaykit/blue/building_tower_A_blue.gltf',
+  mill:'assets/kaykit/blue/building_windmill_blue.gltf',
+  wall:'assets/kaykit/neutral/wall_straight.gltf',
+};
+async function preloadModels(){
+  for(const [k,u] of Object.entries(MODEL_FILES)){
+    const g=await _loadGLTF(u); const s=g.scene;
+    // KayKitの共有ジオメトリ/マテリアルは破棄しない（クローンが参照するため）
+    s.traverse(o=>{ if(o.geometry) SHARED.add(o.geometry); const m=o.material; if(m){ (Array.isArray(m)?m:[m]).forEach(x=>SHARED.add(x)); } });
+    MODELS[k]=s;
+  }
+}
+const _bbox=new THREE.Box3(), _bsz=new THREE.Vector3(), _bc=new THREE.Vector3();
+function fitToHeight(model, targetH){ _bbox.setFromObject(model); _bbox.getSize(_bsz); model.scale.setScalar(targetH/(_bsz.y||1));
+  _bbox.setFromObject(model); _bbox.getCenter(_bc); model.position.x-=_bc.x; model.position.z-=_bc.z; model.position.y-=_bbox.min.y; return model; }
+function cloneModel(key){ const src=MODELS[key]; return src? src.clone(true): null; }
+
+const BUILD_KEY={ house:'house', mill:'mill', tower:'tower', barracks:'barracks' };
+const BUILD_H={ house:2.0, mill:3.0, tower:3.6, barracks:2.2 };
 function makeBuildingMesh(type, level, unitKind){ const g=new THREE.Group();
-  if(type==='house'){ const w=mk(new THREE.BoxGeometry(1.7,1.1,1.7),BCOL.houseWall); w.position.y=0.55; g.add(w);
-    const roof=mk(new THREE.ConeGeometry(1.4,1.1,4),BCOL.houseRoof); roof.position.y=1.65; roof.rotation.y=Math.PI/4; g.add(roof); }
-  else if(type==='mill'){ const b=mk(new THREE.CylinderGeometry(0.85,1.05,2.0,8),BCOL.mill); b.position.y=1.0; g.add(b);
-    const cap=mk(new THREE.ConeGeometry(1.0,0.7,8),BCOL.woodDark); cap.position.y=2.2; g.add(cap);
-    const sails=new THREE.Group(); sails.position.set(0,1.5,0.95); g.userData.sails=sails;
-    for(let i=0;i<4;i++){ const holder=new THREE.Group(); const bl=mk(new THREE.BoxGeometry(0.1,1.2,0.04),0xeae0c0,{outline:false}); bl.position.y=0.62; holder.add(bl); holder.rotation.z=i*Math.PI/2; sails.add(holder); } g.add(sails); }
-  else if(type==='tower'){ const h=level>0?3.4:2.8; const t=mk(new THREE.CylinderGeometry(0.85,1.05,h,8),BCOL.stone); t.position.y=h/2; g.add(t);
-    for(let i=0;i<6;i++){ const a=i/6*Math.PI*2; const c=mk(new THREE.BoxGeometry(0.3,0.4,0.3),BCOL.stoneDark); c.position.set(Math.cos(a)*0.85,h,Math.sin(a)*0.85); g.add(c); }
-    const ar=mk(new THREE.CapsuleGeometry(0.22,0.4,4,6),0x2e6fd6); ar.position.y=h+0.4; g.add(ar); }
-  else if(type==='barracks'){ const hut=mk(new THREE.BoxGeometry(1.9,1.0,1.6),BCOL.wood); hut.position.y=0.5; g.add(hut);
-    const roof=mk(new THREE.BoxGeometry(2.1,0.3,1.8),BCOL.woodDark); roof.position.y=1.1; g.add(roof);
-    const fcol=unitKind?UNITS[unitKind].color:0x888888;
-    const pole=mk(new THREE.CylinderGeometry(0.05,0.05,1.5,5),0xdddddd,{outline:false}); pole.position.set(0.85,1.6,0.65); g.add(pole);
-    const flag=mk(new THREE.BoxGeometry(0.7,0.45,0.05),fcol); flag.position.set(1.15,1.9,0.65); g.add(flag); }
-  groundBlob(g, {house:1.4,mill:1.3,tower:1.4,barracks:1.6}[type]||1.4);
-  // 夜の暖色グロー（灯りの島）
+  let key=BUILD_KEY[type]||'house';
+  if(type==='barracks' && unitKind==='archer') key='archery';
+  const m=cloneModel(key);
+  if(m){ fitToHeight(m, BUILD_H[type]||2.2); m.traverse(o=>{ if(o.isMesh){ o.castShadow=true; o.receiveShadow=true; } }); g.add(m); }
+  groundBlob(g, {house:1.5,mill:1.5,tower:1.5,barracks:1.7}[type]||1.5);
   const pl=new THREE.PointLight(0xff9a3c, 0, 11, 2); pl.position.y=2.0; g.add(pl); g.userData.light=pl;
   scene.add(g); return g;
 }
-function makeWallMesh(level){ const g=new THREE.Group();
-  for(let i=-1;i<=1;i++){ const b=mk(new THREE.BoxGeometry(1.05,level>0?1.5:1.1,1.5), i===0?BCOL.stone:BCOL.stoneDark);
-    b.position.set(i*1.05,(level>0?0.75:0.55),0); g.add(b); }
-  groundBlob(g,2.0); scene.add(g); return g; }
+function makeWallMesh(level){ const g=new THREE.Group(); const m=cloneModel('wall');
+  if(m){ fitToHeight(m, level>0?1.9:1.4); m.traverse(o=>{ if(o.isMesh){ o.castShadow=true; o.receiveShadow=true; } }); g.add(m); }
+  groundBlob(g,1.8); scene.add(g); return g; }
 
 function spawnHitFx(wx,wy,wz,color){ for(let i=0;i<6;i++){ const p=new THREE.Mesh(PART_GEO,new THREE.MeshBasicMaterial({color,transparent:true}));
   p.position.set(wx,wy,wz); p.userData={vx:(Math.random()-0.5)*6,vy:Math.random()*5+1,vz:(Math.random()-0.5)*6,t:0.45}; scene.add(p); particles.push(p); } }
@@ -773,10 +788,12 @@ function loop(ts){ const dt=Math.min(0.05,(ts-last)/1000||0); last=ts; gameTime+
 addEventListener('resize', ()=>{ camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth,innerHeight); composer.setSize(innerWidth,innerHeight); });
 
 buildLayout(); updateNodeRings(); updateHud();
-document.getElementById('startGameBtn').onclick=startGame;
 document.getElementById('startNightBtn').onclick=startNight;
-document.getElementById('loading').style.display='none';
 requestAnimationFrame(loop);
+// KayKit素材を読み込んでからゲーム開始可能に
+const _ld=document.getElementById('loading'); _ld.textContent='3D素材を読み込み中…';
+preloadModels().then(()=>{ _ld.style.display='none'; document.getElementById('startGameBtn').onclick=startGame; })
+  .catch(e=>{ _ld.textContent='素材の読み込みに失敗: '+e.message; console.error(e); });
 
 window.dbg={ get state(){return state;}, set state(v){state=v;}, startGame, startNight, get gold(){return gold;}, set gold(v){gold=v;},
   get nightIndex(){return nightIndex;}, set nightIndex(v){nightIndex=v;}, castle, king, nodes, wallSlots, BUILDINGS, WALLDEF, UNITS, ENEMIES,

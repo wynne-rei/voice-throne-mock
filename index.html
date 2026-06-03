@@ -123,6 +123,7 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 
 /* =========================================================================
    VoiceThrone モック v0.3 — Nordfels 3D ／ 型付きスポット＋壁セグメント＋兵舎
@@ -323,22 +324,10 @@ for(const k of ALL_DIRS){ const s=SPAWNS[k]; const g=new THREE.Group();
 
 // ===== 城 =====
 const castleGroup=new THREE.Group(); castleGroup.position.set(toWX(castle.x),0,toWZ(castle.y)); scene.add(castleGroup);
-(()=>{ const base=mk(new THREE.CylinderGeometry(3.4,3.8,2.2,10),0x8a8a8a,{recv:true}); base.position.y=1.1; castleGroup.add(base);
-  const keep=mk(new THREE.BoxGeometry(2.6,2.8,2.6),0x9a9a9a); keep.position.y=2.6; castleGroup.add(keep);
-  for(let i=0;i<10;i++){ const a=i/10*Math.PI*2; const c=mk(new THREE.BoxGeometry(0.5,0.6,0.5),0x7e7e7e);
-    c.position.set(Math.cos(a)*3.4,2.3,Math.sin(a)*3.4); castleGroup.add(c); }
-  const pole=mk(new THREE.CylinderGeometry(0.07,0.07,2.2,5),0xdddddd,{outline:false}); pole.position.set(0,5.1,0); castleGroup.add(pole);
-  const flag=mk(new THREE.BoxGeometry(1.3,0.8,0.08),0x2e6fd6); flag.position.set(0.72,5.4,0); castleGroup.add(flag);
-  castleGroup.userData.flag=flag; groundBlob(castleGroup,4.3); })();
+castleGroup.userData.flag=null; // 城モデルは preload 後 setupModelEntities() で生成
 
-// ===== キング =====
+// ===== キング（Knightモデルを preload 後に生成） =====
 const kingGroup=new THREE.Group(); scene.add(kingGroup);
-(()=>{ const horse=mk(new THREE.BoxGeometry(1.9,0.85,0.95),0x3b5a8a); horse.position.y=0.95; kingGroup.add(horse);
-  for(const [dx,dz] of [[0.7,0.35],[0.7,-0.35],[-0.7,0.35],[-0.7,-0.35]]){ const leg=mk(new THREE.BoxGeometry(0.22,0.9,0.22),0x2e4668); leg.position.set(dx,0.45,dz); kingGroup.add(leg); }
-  const neck=mk(new THREE.BoxGeometry(0.5,0.8,0.5),0x3b5a8a); neck.position.set(1.0,1.45,0); kingGroup.add(neck);
-  const rider=mk(new THREE.CapsuleGeometry(0.34,0.7,4,8),0x2e6fd6); rider.position.set(-0.1,1.95,0); kingGroup.add(rider);
-  const crown=mk(new THREE.ConeGeometry(0.34,0.4,5),0xf2c84b,{outline:false}); crown.position.set(-0.1,2.65,0); kingGroup.add(crown);
-  groundBlob(kingGroup,1.25); })();
 const daggerRing=new THREE.Mesh(new THREE.TorusGeometry(king.daggerRange*S,0.12,8,28), new THREE.MeshBasicMaterial({color:0xffffff,transparent:true,opacity:0}));
 daggerRing.rotation.x=-Math.PI/2; daggerRing.position.y=0.1; kingGroup.add(daggerRing);
 
@@ -348,49 +337,43 @@ daggerRing.rotation.x=-Math.PI/2; daggerRing.position.y=0.1; kingGroup.add(dagge
 function tagBody(g,body,col){ body.traverse(o=>{ if(o.material&&o.material.emissive!==undefined&&o.material!==OUTLINE_MAT){
   o.material.emissive=new THREE.Color(col); o.material.emissiveIntensity=0; }}); g.userData.body=body; }
 
-function makeEnemyMesh(type){ const def=ENEMIES[type], g=new THREE.Group(), col=ENEMY_COLOR[type]||ENEMY_COLOR.base, rr=def.r*S; let body;
-  if(type==='ogre'){ body=mk(new THREE.CapsuleGeometry(rr*0.9,rr*1.6,4,8),col); body.position.y=rr*1.5; }
-  else if(type==='wasp'){ body=mk(new THREE.IcosahedronGeometry(rr*1.2,0),col,{outline:false});
-    const w=mk(new THREE.BoxGeometry(rr*2.4,0.05,rr*0.8),0xffffff,{outline:false,cast:false}); w.position.y=rr*0.3; body.add(w); }
-  else if(type==='racer'){ body=mk(new THREE.ConeGeometry(rr*1.1,rr*2.4,6),col); body.rotation.z=Math.PI/2; body.position.y=rr; }
-  else if(type==='catapult'){ body=mk(new THREE.BoxGeometry(rr*1.6,rr*1.4,rr*1.8),col); body.position.y=rr*0.9;
-    const arm=mk(new THREE.BoxGeometry(0.15,rr*2,0.15),0x6e4b2a); arm.position.set(0,rr*1.8,0); arm.rotation.z=-0.5; body.add(arm); }
-  else if(type==='hunterling'){ body=mk(new THREE.CapsuleGeometry(rr*0.8,rr*1.1,4,8),col);
-    const eye=mk(new THREE.SphereGeometry(rr*0.4,8,8),0xffe0e0,{outline:false}); eye.position.set(rr*0.6,rr*0.7,0); body.add(eye); body.position.y=rr*1.1; }
-  else { body=mk(new THREE.CapsuleGeometry(rr*0.7,rr*1.1,4,8),col); body.position.y=rr*1.1;
-    if(type==='archer'){ const bow=mk(new THREE.TorusGeometry(rr*0.7,0.06,6,10,Math.PI),0x6e4b2a,{outline:false}); bow.position.set(rr*0.7,rr*0.4,0); body.add(bow); } }
-  tagBody(g,body,col); g.add(body);
-  if(!def.flying){ groundBlob(g, Math.max(0.45,def.r*S*1.5)); const tr=teamRing(g, enemyRingMat); tr.scale.setScalar(Math.max(0.8,def.r*S*1.4)); }
+function makeEnemyMesh(type){ const def=ENEMIES[type], h=ENEMY_H[type]||1.6;
+  const g=makeCharMesh(ENEMY_MODEL[type]||'Skeleton_Warrior', h);
+  if(!def.flying){ groundBlob(g, Math.max(0.5,h*0.42)); const tr=teamRing(g, enemyRingMat); tr.scale.setScalar(Math.max(0.85,h*0.62)); }
   scene.add(g); return g;
 }
-function makeFriendlyMesh(kind){ const def=UNITS[kind], g=new THREE.Group(), col=def.color;
-  const body=mk(new THREE.CapsuleGeometry(0.32,0.6,4,8),col); body.position.y=0.6; g.add(body);
-  if(kind==='archer'){ const bow=mk(new THREE.TorusGeometry(0.3,0.05,6,10,Math.PI),0x6e4b2a,{outline:false}); bow.position.set(0.34,0.7,0); g.add(bow); }
-  else if(kind==='spearman'){ const sp=mk(new THREE.CylinderGeometry(0.04,0.04,1.4,5),0xcfcfcf,{outline:false}); sp.position.set(0.3,0.95,0); g.add(sp); }
-  else if(kind==='flail'){ const h=mk(new THREE.CylinderGeometry(0.04,0.04,0.7,5),0x8a8a8a,{outline:false}); h.position.set(0.3,1.0,0); g.add(h);
-    const bl=mk(new THREE.SphereGeometry(0.16,6,6),0x888888,{outline:false}); bl.position.set(0.3,1.35,0); g.add(bl); }
-  else if(kind==='berserk'){ const ax=mk(new THREE.BoxGeometry(0.32,0.3,0.06),0xcfcfcf,{outline:false}); ax.position.set(0.36,0.95,0); g.add(ax); }
-  else { const sw=mk(new THREE.BoxGeometry(0.08,0.6,0.08),0xdfdfdf,{outline:false}); sw.position.set(0.32,0.9,0); g.add(sw); }
-  tagBody(g,body,col); groundBlob(g,0.5); teamRing(g, allyRingMat); scene.add(g); return g;
+function makeFriendlyMesh(kind){ const h=ALLY_H[kind]||1.6;
+  const g=makeCharMesh(ALLY_MODEL[kind]||'Knight', h);
+  groundBlob(g,0.6); const tr=teamRing(g, allyRingMat); tr.scale.setScalar(0.7);
+  scene.add(g); return g;
 }
 // ===== KayKit 3Dモデル読み込み（CC0・中世低ポリ） =====
 const MODELS={};
 const _gltfLoader=new GLTFLoader();
 function _loadGLTF(url){ return new Promise((res,rej)=>_gltfLoader.load(url, g=>res(g), undefined, rej)); }
+const CLIPS={};
 const MODEL_FILES={
   house:'assets/kaykit/blue/building_home_A_blue.gltf',
   barracks:'assets/kaykit/blue/building_barracks_blue.gltf',
   archery:'assets/kaykit/blue/building_archeryrange_blue.gltf',
   tower:'assets/kaykit/blue/building_tower_A_blue.gltf',
   mill:'assets/kaykit/blue/building_windmill_blue.gltf',
+  castle:'assets/kaykit/blue/building_castle_blue.gltf',
   wall:'assets/kaykit/neutral/wall_straight.gltf',
+  Knight:'assets/kaykit/chars/Knight.glb',
+  Barbarian:'assets/kaykit/chars/Barbarian.glb',
+  Rogue:'assets/kaykit/chars/Rogue.glb',
+  Skeleton_Warrior:'assets/kaykit/chars/Skeleton_Warrior.glb',
+  Skeleton_Minion:'assets/kaykit/chars/Skeleton_Minion.glb',
+  Skeleton_Rogue:'assets/kaykit/chars/Skeleton_Rogue.glb',
+  Skeleton_Mage:'assets/kaykit/chars/Skeleton_Mage.glb',
 };
 async function preloadModels(){
   for(const [k,u] of Object.entries(MODEL_FILES)){
     const g=await _loadGLTF(u); const s=g.scene;
     // KayKitの共有ジオメトリ/マテリアルは破棄しない（クローンが参照するため）
     s.traverse(o=>{ if(o.geometry) SHARED.add(o.geometry); const m=o.material; if(m){ (Array.isArray(m)?m:[m]).forEach(x=>SHARED.add(x)); } });
-    MODELS[k]=s;
+    MODELS[k]=s; if(g.animations&&g.animations.length) CLIPS[k]=g.animations;
   }
 }
 const _bbox=new THREE.Box3(), _bsz=new THREE.Vector3(), _bc=new THREE.Vector3();
@@ -412,6 +395,33 @@ function makeBuildingMesh(type, level, unitKind){ const g=new THREE.Group();
 function makeWallMesh(level){ const g=new THREE.Group(); const m=cloneModel('wall');
   if(m){ fitToHeight(m, level>0?1.9:1.4); m.traverse(o=>{ if(o.isMesh){ o.castShadow=true; o.receiveShadow=true; } }); g.add(m); }
   groundBlob(g,1.8); scene.add(g); return g; }
+
+// ===== KayKitキャラ（リギング済み・アニメ付き） =====
+const CHAR_FACE=Math.PI; // モデルの向き補正（実機で調整）
+function makeCharMesh(modelKey, height){ const g=new THREE.Group(); const src=MODELS[modelKey];
+  if(src){ const m=cloneSkinned(src); m.traverse(o=>{ if(o.isMesh){ o.castShadow=true; o.frustumCulled=false; } });
+    fitToHeight(m,height); m.rotation.y=CHAR_FACE; g.add(m);
+    const clips=CLIPS[modelKey];
+    if(clips){ const mx=new THREE.AnimationMixer(m);
+      const ci=clips.find(c=>c.name==='Idle')||clips.find(c=>/idle/i.test(c.name));
+      const cw=clips.find(c=>c.name==='Walking_A')||clips.find(c=>c.name==='Running_A')||clips.find(c=>/walk|run/i.test(c.name));
+      const ai=ci?mx.clipAction(ci):null, aw=cw?mx.clipAction(cw):null; if(ai) ai.play();
+      g.userData.mixer=mx; g.userData.ai=ai; g.userData.aw=aw; g.userData.anim='idle'; } }
+  return g; }
+function setCharWalk(g, moving){ const u=g.userData; if(!u.mixer) return; const want=moving?'walk':'idle'; if(u.anim===want) return; u.anim=want;
+  const to=moving?u.aw:u.ai, from=moving?u.ai:u.aw; if(to){ to.reset().fadeIn(0.18).play(); } if(from){ from.fadeOut(0.18); } }
+const ALLY_MODEL={ knight:'Knight', spearman:'Knight', flail:'Barbarian', berserk:'Barbarian', archer:'Rogue' };
+const ALLY_H={ knight:2.5, spearman:2.5, flail:2.6, berserk:2.4, archer:2.4 };
+const ENEMY_MODEL={ swordsman:'Skeleton_Warrior', archer:'Skeleton_Rogue', ogre:'Skeleton_Warrior', racer:'Skeleton_Minion', wasp:'Skeleton_Mage', hunterling:'Skeleton_Rogue', catapult:'Skeleton_Warrior' };
+const ENEMY_H={ swordsman:2.4, archer:2.4, ogre:3.8, racer:2.0, wasp:2.2, hunterling:2.4, catapult:3.6 };
+// 城・王を本物モデルに（素材読み込み後に呼ぶ）
+function setupModelEntities(){
+  const cm=cloneModel('castle'); if(cm){ fitToHeight(cm,4.6); cm.traverse(o=>{ if(o.isMesh){ o.castShadow=true; o.receiveShadow=true; } }); castleGroup.add(cm); }
+  groundBlob(castleGroup,4.2);
+  const kg=makeCharMesh('Knight',2.0); kingGroup.add(kg);
+  Object.assign(kingGroup.userData,{mixer:kg.userData.mixer,ai:kg.userData.ai,aw:kg.userData.aw,anim:'idle'});
+  groundBlob(kingGroup,1.0);
+}
 
 function spawnHitFx(wx,wy,wz,color){ for(let i=0;i<6;i++){ const p=new THREE.Mesh(PART_GEO,new THREE.MeshBasicMaterial({color,transparent:true}));
   p.position.set(wx,wy,wz); p.userData={vx:(Math.random()-0.5)*6,vy:Math.random()*5+1,vz:(Math.random()-0.5)*6,t:0.45}; scene.add(p); particles.push(p); } }
@@ -537,7 +547,7 @@ function sellWall(){ const w=selectedWall; if(!w||!w.built) return; gold+=Math.c
 // ===== 味方ユニット（兵舎） =====
 function spawnSquad(bd){ const def=UNITS[bd.unit]; const count=def.count+BUILDINGS.barracks.levels[bd.level].extra; bd.units=[];
   for(let i=0;i<count;i++){ const a=i/count*Math.PI*2; const hx=bd.x+Math.cos(a)*30, hy=bd.y+Math.sin(a)*26;
-    const u={ kind:bd.unit, def, x:hx, y:hy, homeX:hx, homeY:hy, hp:def.hp, maxHp:def.hp, cd:0, flash:0, dir:0, mesh:makeFriendlyMesh(bd.unit), barracks:bd, bobOff:Math.random()*6.28, moving:false, atkAnim:0, spawnT:0.22, baseScale:1.3 };
+    const u={ kind:bd.unit, def, x:hx, y:hy, homeX:hx, homeY:hy, hp:def.hp, maxHp:def.hp, cd:0, flash:0, dir:0, mesh:makeFriendlyMesh(bd.unit), barracks:bd, bobOff:Math.random()*6.28, moving:false, atkAnim:0, spawnT:0.22, baseScale:1.0 };
     friendlies.push(u); bd.units.push(u); }
 }
 function clearSquad(bd){ if(!bd.units) return; for(const u of bd.units){ if(u.mesh){ scene.remove(u.mesh); disposeObject(u.mesh); } u.dead=true; }
@@ -556,7 +566,7 @@ function buildSpawnQueue(n){ spawnQueue=[]; const wave=WAVES[n-1]; let list=[];
   list=shuffle(list); const interval=clamp(7/list.length,0.18,1.4); let t=0.6, di=0;
   for(const type of list){ const pool=ENEMIES[type].flying?FLY_DIRS:ALL_DIRS; spawnQueue.push({t,type,dir:pool[di%pool.length]}); di++; t+=interval; } }
 function spawnEnemy(type,dir){ const def=ENEMIES[type], s=SPAWNS[dir];
-  enemies.push({ type,def, x:s.x+rnd(-14,14), y:s.y+rnd(-14,14), hp:def.hp, maxHp:def.hp, cd:0, flash:0, target:def.target, mesh:makeEnemyMesh(type), bobOff:Math.random()*6.28, moving:false, atkAnim:0, spawnT:0.22, baseScale:1.35 }); }
+  enemies.push({ type,def, x:s.x+rnd(-14,14), y:s.y+rnd(-14,14), hp:def.hp, maxHp:def.hp, cd:0, flash:0, target:def.target, mesh:makeEnemyMesh(type), bobOff:Math.random()*6.28, moving:false, atkAnim:0, spawnT:0.22, baseScale:1.0 }); }
 function nightCleared(){ let income=0;
   for(const n of nodes){ const b=n.building; if(b&&(b.type==='house'||b.type==='mill')) income+=BUILDINGS[b.type].levels[b.level].income; }
   gold+=income;
@@ -589,7 +599,11 @@ function update(dt){ updateKing(dt);
     updateEnemies(dt); updateFriendlies(dt); updateTowers(dt);
     if(!spawnQueue.length && enemies.length===0) nightCleared();
   }
-  updateProjectiles(dt); updateParticles(dt); updateHud(); updateWarnIcons(); }
+  updateProjectiles(dt); updateParticles(dt); updateHud(); updateWarnIcons();
+  // キャラのアニメmixer更新
+  for(const e of enemies){ const mx=e.mesh&&e.mesh.userData.mixer; if(mx) mx.update(dt); }
+  for(const u of friendlies){ const mx=u.mesh&&u.mesh.userData.mixer; if(mx) mx.update(dt); }
+  if(kingGroup.userData.mixer) kingGroup.userData.mixer.update(dt); }
 
 function updateKing(dt){
   if(king.downed>0){ king.moving=false; king.downed-=dt; king.x+=(castle.x-king.x)*Math.min(1,dt*4); king.y+=((castle.y+60)-king.y)*Math.min(1,dt*4); if(king.downed<=0) king.hp=king.maxHp; }
@@ -677,26 +691,23 @@ function drawHpBars(){
   for(let i=barUsed;i<barPool.length;i++) barPool[i].grp.visible=false;
 }
 function syncScene(){
-  // 王（移動でギャロップのバウンド）
-  const kb=king.moving?Math.abs(Math.sin(gameTime*13))*0.16:0;
-  kingGroup.position.set(toWX(king.x),kb,toWZ(king.y)); kingGroup.rotation.y=king.dir;
-  kingGroup.visible=(state===STATE.NIGHT||state===STATE.DAY);
+  // 王（Knightモデル・歩き/待機アニメ）
+  kingGroup.position.set(toWX(king.x),0,toWZ(king.y)); kingGroup.rotation.y=king.dir;
+  kingGroup.visible=(state===STATE.NIGHT||state===STATE.DAY); setCharWalk(kingGroup, king.moving);
   daggerRing.material.opacity=king.flash>0?0.8:0;
-  // 敵：歩きバウンド／攻撃の突き／出現ポップ／ヒット伸縮
-  for(const e of enemies){ const m=e.mesh; if(!m) continue; const wx=toWX(e.x), wz=toWZ(e.y); let baseY,bob;
-    if(e.def.flying){ baseY=3.4+Math.sin(gameTime*3+e.bobOff)*0.3; bob=0; }
-    else { baseY=0; bob=e.moving?Math.abs(Math.sin(gameTime*11+e.bobOff))*0.16:Math.sin(gameTime*2.5+e.bobOff)*0.04; }
-    let lunge=0; if(e.atkAnim>0){ const p=1-e.atkAnim/0.22; lunge=Math.sin(p*Math.PI)*0.55; }
-    const fa=m.rotation.y; m.position.set(wx+Math.sin(fa)*lunge, baseY+bob, wz+Math.cos(fa)*lunge);
-    let sc=e.baseScale; if(e.spawnT>0) sc*=1-(e.spawnT/0.22)*0.65; if(e.flash>0) sc*=1+e.flash*1.1; m.scale.setScalar(sc);
-    setEmissive(m, e.flash>0?0.95:(0.12+nightT*0.4)); }
+  // 敵：攻撃の突き／出現ポップ／ヒット伸縮／歩き走りアニメ
+  for(const e of enemies){ const m=e.mesh; if(!m) continue; const wx=toWX(e.x), wz=toWZ(e.y);
+    const baseY = e.def.flying ? 3.0+Math.sin(gameTime*3+e.bobOff)*0.3 : 0;
+    let lunge=0; if(e.atkAnim>0){ const p=1-e.atkAnim/0.22; lunge=Math.sin(p*Math.PI)*0.4; }
+    const fa=m.rotation.y; m.position.set(wx+Math.sin(fa)*lunge, baseY, wz+Math.cos(fa)*lunge);
+    let sc=e.baseScale; if(e.spawnT>0) sc*=1-(e.spawnT/0.22)*0.6; if(e.flash>0) sc*=1+e.flash*0.5; m.scale.setScalar(sc);
+    setCharWalk(m, e.moving); }
   // 味方
-  for(const u of friendlies){ const m=u.mesh; if(!m) continue; const wx=toWX(u.x), wz=toWZ(u.y);
-    const bob=u.moving?Math.abs(Math.sin(gameTime*12+u.bobOff))*0.15:Math.sin(gameTime*2.5+u.bobOff)*0.04;
-    let lunge=0; if(u.atkAnim>0){ const p=1-u.atkAnim/0.2; lunge=Math.sin(p*Math.PI)*0.5; }
-    m.rotation.y=u.dir; const fa=u.dir; m.position.set(wx+Math.sin(fa)*lunge, bob, wz+Math.cos(fa)*lunge);
-    let sc=u.baseScale; if(u.spawnT>0) sc*=1-(u.spawnT/0.22)*0.65; if(u.flash>0) sc*=1+u.flash*1.1; m.scale.setScalar(sc);
-    setEmissive(m, u.flash>0?0.95:(0.12+nightT*0.4)); }
+  for(const u of friendlies){ const m=u.mesh; if(!m) continue;
+    let lunge=0; if(u.atkAnim>0){ const p=1-u.atkAnim/0.2; lunge=Math.sin(p*Math.PI)*0.35; }
+    m.rotation.y=u.dir; const fa=u.dir; m.position.set(toWX(u.x)+Math.sin(fa)*lunge, 0, toWZ(u.y)+Math.cos(fa)*lunge);
+    let sc=u.baseScale; if(u.spawnT>0) sc*=1-(u.spawnT/0.22)*0.6; if(u.flash>0) sc*=1+u.flash*0.5; m.scale.setScalar(sc);
+    setCharWalk(m, u.moving); }
   // ミルの羽／城の旗／水のゆらぎ
   for(const n of nodes){ const b=n.building; if(b&&b.type==='mill'&&b.mesh&&b.mesh.userData.sails) b.mesh.userData.sails.rotation.z+=0.03; }
   if(castleGroup.userData.flag) castleGroup.userData.flag.rotation.y=Math.sin(gameTime*4)*0.35;
@@ -792,7 +803,7 @@ document.getElementById('startNightBtn').onclick=startNight;
 requestAnimationFrame(loop);
 // KayKit素材を読み込んでからゲーム開始可能に
 const _ld=document.getElementById('loading'); _ld.textContent='3D素材を読み込み中…';
-preloadModels().then(()=>{ _ld.style.display='none'; document.getElementById('startGameBtn').onclick=startGame; })
+preloadModels().then(()=>{ setupModelEntities(); _ld.style.display='none'; document.getElementById('startGameBtn').onclick=startGame; })
   .catch(e=>{ _ld.textContent='素材の読み込みに失敗: '+e.message; console.error(e); });
 
 window.dbg={ get state(){return state;}, set state(v){state=v;}, startGame, startNight, get gold(){return gold;}, set gold(v){gold=v;},

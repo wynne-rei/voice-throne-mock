@@ -186,11 +186,11 @@ const ENEMIES = {
 const ENEMY_COLOR = { base:0xd63a36, hunterling:0xff5fa0, racer:0xe0683a, wasp:0xc0463a, ogre:0xb03030, catapult:0x9a3a2a, archer:0xcf5a3a };
 
 const WAVES = [
-  [['swordsman',3]], [['swordsman',8]], [['swordsman',8],['hunterling',2]],
-  [['archer',24]], [['racer',15]], [['swordsman',20],['archer',20]],
-  [['wasp',15]], [['swordsman',30],['hunterling',10],['racer',10]], [['wasp',25],['ogre',5]],
-  [['swordsman',90],['ogre',3]], [['archer',50],['racer',30]], [['hunterling',5]],
-  [['swordsman',80],['racer',35],['wasp',30],['archer',30],['catapult',16],['ogre',7],['hunterling',5]],
+  [['swordsman',6]], [['swordsman',14]], [['swordsman',14],['hunterling',3]],
+  [['archer',30]], [['racer',22]], [['swordsman',28],['archer',24]],
+  [['wasp',22]], [['swordsman',44],['hunterling',12],['racer',14]], [['wasp',32],['ogre',7]],
+  [['swordsman',120],['ogre',5]], [['archer',60],['racer',40]], [['hunterling',10]],
+  [['swordsman',110],['racer',45],['wasp',40],['archer',40],['catapult',20],['ogre',10],['hunterling',8]],
 ];
 
 // ===== 型付きノード ＆ 壁スロットの配置（Nordfels準拠） =================
@@ -203,7 +203,7 @@ function placeNodes(types, r, off){ const ps=ringPositions(r, types.length, off)
   for(let i=0;i<types.length;i++) nodes.push({ id:nodes.length, x:ps[i].x, y:ps[i].y, type:types[i], building:null, ring3d:null }); }
 function buildLayout(){
   // 外周（壁なし）: ミル3・弓櫓3・弓兵舎1
-  placeNodes(['mill','tower','mill','tower','mill','tower','barracks_r'], 240, 0.15);
+  placeNodes(['mill','tower','mill','tower','mill','tower','barracks_r'], 200, 0.15);
   // 前面: 家3・弓櫓4・近接兵舎1
   placeNodes(['house','tower','tower','house','tower','barracks_m','house','tower'], 158, 0.40);
   // 内城: 家7・弓櫓3・近接兵舎1・弓兵舎1
@@ -214,6 +214,36 @@ function buildLayout(){
   const inner = ringPositions(68, 10, 0.0), gapsI=[3,8];
   inner.forEach((p,i)=>{ if(gapsI.includes(i)) return; wallSlots.push({ id:wallSlots.length, x:p.x, y:p.y, isWall:true, r:15, built:false, hp:0, maxHp:0, level:0, mesh:null, ring3d:null }); });
 }
+
+// ===== 地形（山・川）＆フローフィールド経路探索 =====
+// 地上の敵は城へ向かい、山/川/壁を迂回（壁に隙間を作るとそこへ殺到＝門/チョーク）
+const GROUND_DIRS=['E','SE']; // 地上スポーンは東・南東の回廊のみ（飛行はFLY_DIRS）
+function isTerrain(x,y){
+  if(y<108) return true;            // 北の山脈
+  if(x<118 && y<430) return true;   // 西の山
+  if(y>478 && x<560) return true;   // 南西の川
+  return false;
+}
+const G_W=48, G_H=30, G_C=20;
+const _pass=new Uint8Array(G_W*G_H), _dist=new Float32Array(G_W*G_H);
+function computeFlow(){
+  for(let cy=0;cy<G_H;cy++)for(let cx=0;cx<G_W;cx++){ const x=cx*G_C+10, y=cy*G_C+10; let p=isTerrain(x,y)?0:1;
+    if(p) for(const w of wallSlots){ if(w.built && Math.hypot(w.x-x,w.y-y)<w.r+12){ p=0; break; } }
+    _pass[cy*G_W+cx]=p; }
+  _dist.fill(1e9);
+  const sc=Math.max(0,Math.min(G_W-1,Math.floor(castle.x/G_C))), sr=Math.max(0,Math.min(G_H-1,Math.floor(castle.y/G_C))), s=sr*G_W+sc;
+  _pass[s]=1; _dist[s]=0; const q=[s]; let head=0;
+  const dirs=[[1,0,1],[-1,0,1],[0,1,1],[0,-1,1],[1,1,1.41],[1,-1,1.41],[-1,1,1.41],[-1,-1,1.41]];
+  while(head<q.length){ const c=q[head++], cx=c%G_W, cy=(c/G_W)|0, d=_dist[c];
+    for(const [dx,dy,w] of dirs){ const nx=cx+dx, ny=cy+dy; if(nx<0||ny<0||nx>=G_W||ny>=G_H) continue;
+      const ni=ny*G_W+nx; if(!_pass[ni]||_dist[ni]<1e9) continue;
+      if(dx&&dy && (!_pass[cy*G_W+nx]||!_pass[ny*G_W+cx])) continue;
+      _dist[ni]=d+w; q.push(ni); } }
+}
+function flowDir(x,y){ const cx=Math.max(0,Math.min(G_W-1,Math.floor(x/G_C))), cy=Math.max(0,Math.min(G_H-1,Math.floor(y/G_C)));
+  let bx=0,by=0,bd=_dist[cy*G_W+cx];
+  for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1],[1,1],[1,-1],[-1,1],[-1,-1]]){ const nx=cx+dx, ny=cy+dy; if(nx<0||ny<0||nx>=G_W||ny>=G_H) continue; const ni=ny*G_W+nx; if(!_pass[ni]) continue; if(_dist[ni]<bd){ bd=_dist[ni]; bx=dx; by=dy; } }
+  if(bx===0&&by===0) return null; const l=Math.hypot(bx,by); return [bx/l,by/l]; }
 
 let enemies=[], friendlies=[], projectiles=[], particles=[], spawnQueue=[];
 let nightTimer=0, selectedNode=null, selectedWall=null;
@@ -316,9 +346,18 @@ function makeTree(x,z){ const g=new THREE.Group();
 function makeRock(x,z,s=1){ const r=mk(new THREE.DodecahedronGeometry(s,0),0x9e9e9e); r.position.set(x,s*0.3,z);
   r.rotation.set(Math.random(),Math.random(),Math.random()); worldGroup.add(r);
   const sb=groundBlob(worldGroup,s*0.95); sb.position.set(x,0.05,z); }
-for(let a=0;a<Math.PI*2;a+=0.34){ const rr=64+Math.random()*6; makeRock(Math.cos(a)*rr,Math.sin(a)*rr*0.72,1.1+Math.random()*1.2); }
-[[-42,-26],[44,-22],[-46,20],[40,26],[-20,-34],[22,32],[-54,-2],[52,4]].forEach(([x,z])=>makeTree(x,z));
-[[-30,-46],[-12,-50],[8,-49],[28,-47]].forEach(([x,z])=>makeRock(x,z,3+Math.random()*1.5));
+// 地形の見える化（通行不可：北の山脈・西の山・南西の川）。logic座標→world: ((x-480)*0.12,(y-300)*0.12)
+// 北の山脈（logic y<108 → world z<-23）
+for(let i=0;i<30;i++){ makeRock(-72+Math.random()*150, -46+Math.random()*22, 2.6+Math.random()*2.8); }
+// 西の山（logic x<118 → world x<-43）
+for(let i=0;i<20;i++){ makeRock(-74+Math.random()*30, -24+Math.random()*46, 2.2+Math.random()*2.4); }
+// 南西の川（logic y>478 & x<560 → world z>21,x<10）
+const river=new THREE.Mesh(new THREE.PlaneGeometry(72,18), new THREE.MeshToonMaterial({color:0x3f93c8,gradientMap:toonRamp,transparent:true,opacity:0.96}));
+river.rotation.x=-Math.PI/2; river.position.set(-24,0.03,29); worldGroup.add(river);
+for(let i=0;i<12;i++){ makeTree(-66+Math.random()*78, 24+Math.random()*16); }
+// 川沿い・縁の岩と森
+for(let a=Math.PI*0.15;a<Math.PI*1.05;a+=0.34){ makeRock(Math.cos(a)*66, Math.sin(a)*66*0.72, 1.1+Math.random()*1.2); }
+[[44,-22],[40,26],[52,4],[48,-8]].forEach(([x,z])=>makeTree(x,z));
 
 for(const k of ALL_DIRS){ const s=SPAWNS[k]; const g=new THREE.Group();
   const ring=new THREE.Mesh(new THREE.TorusGeometry(1.6,0.18,8,20), new THREE.MeshBasicMaterial({color:0xff5a5a}));
@@ -576,12 +615,12 @@ function respawnAllSquads(){ for(const u of friendlies) if(u.mesh){ scene.remove
 //  夜の進行
 // =========================================================================
 function startNight(){ if(state!==STATE.DAY) return; nightIndex++; state=STATE.NIGHT; select(null);
-  document.getElementById('startNightBtn').style.display='none'; buildSpawnQueue(nightIndex); nightTimer=0;
+  document.getElementById('startNightBtn').style.display='none'; computeFlow(); buildSpawnQueue(nightIndex); nightTimer=0;
   respawnAllSquads(); setDayNight(1); toast(`夜 ${nightIndex} / ${TOTAL_NIGHTS} — 侵攻開始`); updateHud(); }
 function buildSpawnQueue(n){ spawnQueue=[]; const wave=WAVES[n-1]; let list=[];
   for(const [type,count] of wave) for(let i=0;i<count;i++) list.push(type);
-  list=shuffle(list); const interval=clamp(7/list.length,0.18,1.4); let t=0.6, di=0;
-  for(const type of list){ const pool=ENEMIES[type].flying?FLY_DIRS:ALL_DIRS; spawnQueue.push({t,type,dir:pool[di%pool.length]}); di++; t+=interval; } }
+  list=shuffle(list); const interval=clamp(4.5/list.length,0.10,0.7); let t=0.5, di=0;
+  for(const type of list){ const pool=ENEMIES[type].flying?FLY_DIRS:GROUND_DIRS; spawnQueue.push({t,type,dir:pool[di%pool.length]}); di++; t+=interval; } }
 function spawnEnemy(type,dir){ const def=ENEMIES[type], s=SPAWNS[dir];
   enemies.push({ type,def, x:s.x+rnd(-14,14), y:s.y+rnd(-14,14), hp:def.hp, maxHp:def.hp, cd:0, flash:0, target:def.target, mesh:makeEnemyMesh(type), bobOff:Math.random()*6.28, moving:false, atkAnim:0, spawnT:0.22, baseScale:1.0 }); }
 function nightCleared(){ let income=0;
@@ -648,11 +687,11 @@ function updateEnemies(dt){
     else if(kingReach){ if(e.mesh) e.mesh.rotation.y=Math.atan2(king.x-e.x,king.y-e.y); if(e.cd<=0){ damageKing(def.dmgCastle); e.cd=def.atkInt; e.atkAnim=0.22; playAttack(e.mesh); } }
     else if(e.target!=='king'&&dCastle<=castleReach){ if(e.mesh) e.mesh.rotation.y=Math.atan2(castle.x-e.x,castle.y-e.y); if(e.cd<=0){ damageCastle(def.dmgCastle); e.cd=def.atkInt; e.atkAnim=0.22; playAttack(e.mesh); e.flash=0.1; } }
     else if(blocker&&bdist<=def.r+blocker.r+(def.ranged?def.atkRange:8)){ if(e.mesh) e.mesh.rotation.y=Math.atan2(blocker.x-e.x,blocker.y-e.y); if(e.cd<=0){ blocker.hp-=def.dmgStruct; e.cd=def.atkInt; e.atkAnim=0.22; playAttack(e.mesh); if(blocker.hp<=0) removeStructure(blocker); } }
-    else { // 前進。近い味方が居れば寄る（交戦のため）
-      e.moving=true;
-      let gx=tx, gy=ty; if(foe && fod<150 && !def.wallOnly){ gx=foe.x; gy=foe.y; }
-      let ax=gx-e.x, ay=gy-e.y; const al=Math.hypot(ax,ay)||1; ax/=al; ay/=al;
-      if(blocker){ const wx=blocker.x-e.x, wy=blocker.y-e.y; ax+=-wy*0.012; ay+=wx*0.012; const l2=Math.hypot(ax,ay)||1; ax/=l2; ay/=l2; }
+    else { // 前進
+      e.moving=true; let ax,ay;
+      if(foe && fod<120 && !def.wallOnly){ ax=foe.x-e.x; ay=foe.y-e.y; const al=Math.hypot(ax,ay)||1; ax/=al; ay/=al; }
+      else if(def.flying || def.wallOnly || e.target==='king'){ ax=tx-e.x; ay=ty-e.y; const al=Math.hypot(ax,ay)||1; ax/=al; ay/=al; }
+      else { const f=flowDir(e.x,e.y); if(f){ ax=f[0]; ay=f[1]; } else { ax=castle.x-e.x; ay=castle.y-e.y; const al=Math.hypot(ax,ay)||1; ax/=al; ay/=al; } }
       e.x+=ax*def.speed*dt; e.y+=ay*def.speed*dt; if(e.mesh) e.mesh.rotation.y=Math.atan2(ax,ay); }
   }
   enemies=enemies.filter(e=>{ if(e.hp<=0){ gold+=e.def.gold; goldFloat(toWX(e.x),toWZ(e.y),e.def.gold); if(e.mesh){ spawnHitFx(e.mesh.position.x,0.6,e.mesh.position.z,ENEMY_COLOR[e.type]||ENEMY_COLOR.base); scene.remove(e.mesh); disposeObject(e.mesh); } return false; } return true; });
@@ -668,7 +707,7 @@ function updateFriendlies(dt){
   friendlies=friendlies.filter(u=>{ if(u.hp<=0){ if(u.mesh){ spawnHitFx(toWX(u.x),0.6,toWZ(u.y),u.def.color); scene.remove(u.mesh); disposeObject(u.mesh); } return false; } return true; });
 }
 function removeStructure(s){
-  if(s.isWall){ s.built=false; if(s.mesh){ scene.remove(s.mesh); disposeObject(s.mesh); s.mesh=null; } if(selectedWall===s) renderBuildBar(); updateNodeRings(); return; }
+  if(s.isWall){ s.built=false; if(s.mesh){ scene.remove(s.mesh); disposeObject(s.mesh); s.mesh=null; } computeFlow(); if(selectedWall===s) renderBuildBar(); updateNodeRings(); return; }
   for(const n of nodes) if(n.building===s){ if(s.type==='barracks') clearSquad(s); if(s.mesh){ scene.remove(s.mesh); disposeObject(s.mesh); } n.building=null; if(selectedNode===n) renderBuildBar(); updateNodeRings(); return; }
 }
 function updateTowers(dt){ for(const n of nodes){ const b=n.building; if(!b||b.type!=='tower') continue; const L=BUILDINGS.tower.levels[b.level]; b.cd-=dt;
@@ -825,7 +864,7 @@ function loop(ts){ const dt=Math.min(0.05,(ts-last)/1000||0); last=ts; gameTime+
   syncScene(); updateCamera(); composer.render(); requestAnimationFrame(loop); }
 addEventListener('resize', ()=>{ camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth,innerHeight); composer.setSize(innerWidth,innerHeight); });
 
-buildLayout(); updateNodeRings(); updateHud();
+buildLayout(); computeFlow(); updateNodeRings(); updateHud();
 document.getElementById('startNightBtn').onclick=startNight;
 requestAnimationFrame(loop);
 // KayKit素材を読み込んでからゲーム開始可能に

@@ -150,10 +150,10 @@ const king = { x:480, y:370, r:11, speed:165, dir:0, hp:100, maxHp:100, downed:0
   bowRange:165, bowDmg:5, bowCd:0, bowInterval:0.95, daggerCd:0, daggerMax:4.0, daggerDmg:26, daggerRange:46, flash:0 };
 
 const SPAWNS = {
-  NE:{x:870,y:80,name:'北東'}, E:{x:920,y:300,name:'東'}, SE:{x:870,y:520,name:'南東'},
-  S:{x:480,y:564,name:'南'}, W:{x:40,y:300,name:'西'} };
-const FLY_DIRS = ['W','S','NE'];
-const ALL_DIRS = ['NE','E','SE','S','W'];
+  E:{x:930,y:300,name:'東'}, S:{x:480,y:570,name:'南'}, NW:{x:150,y:108,name:'北西'},
+  W:{x:40,y:330,name:'西'}, SE:{x:850,y:528,name:'南東'}, NE:{x:852,y:96,name:'北東'} };
+const FLY_DIRS = ['W','SE','NE'];          // 飛行は地形を無視して別方向から
+const ALL_DIRS = ['E','S','NW','W','SE','NE'];
 
 // ===== 建物・ユニット・敵 定義 =========================================
 const BUILDINGS = {
@@ -217,12 +217,14 @@ function buildLayout(){
 
 // ===== 地形（山・川）＆フローフィールド経路探索 =====
 // 地上の敵は城へ向かい、山/川/壁を迂回（壁に隙間を作るとそこへ殺到＝門/チョーク）
-const GROUND_DIRS=['E','SE']; // 地上スポーンは東・南東の回廊のみ（飛行はFLY_DIRS）
+const GROUND_DIRS=['E','S','NW']; // 地上は3ルート（東・南・北西の開口）
+// 地形＝中央は開け、外周は山/川で通行不可。ただし3つの開口(ルート)を残す→敵は3方向から来る
 function isTerrain(x,y){
-  if(y<108) return true;            // 北の山脈
-  if(x<118 && y<430) return true;   // 西の山
-  if(y>478 && x<560) return true;   // 南西の川
-  return false;
+  const dx=(x-480)/420, dy=(y-300)/265, r2=dx*dx+dy*dy;
+  if(r2<0.6) return false;                 // 中央は開けている
+  const ang=Math.atan2(y-300,x-480);       // 0=東, PI/2=南, PI=西, -PI/2=北
+  for(const g of [0.0, 1.57, -2.45]){ let d=Math.abs(ang-g); if(d>Math.PI)d=2*Math.PI-d; if(d<0.52) return false; } // 東/南/北西の開口
+  return true;
 }
 const G_W=48, G_H=30, G_C=20;
 const _pass=new Uint8Array(G_W*G_H), _dist=new Float32Array(G_W*G_H);
@@ -346,18 +348,16 @@ function makeTree(x,z){ const g=new THREE.Group();
 function makeRock(x,z,s=1){ const r=mk(new THREE.DodecahedronGeometry(s,0),0x9e9e9e); r.position.set(x,s*0.3,z);
   r.rotation.set(Math.random(),Math.random(),Math.random()); worldGroup.add(r);
   const sb=groundBlob(worldGroup,s*0.95); sb.position.set(x,0.05,z); }
-// 地形の見える化（通行不可：北の山脈・西の山・南西の川）。logic座標→world: ((x-480)*0.12,(y-300)*0.12)
-// 北の山脈（logic y<108 → world z<-23）
-for(let i=0;i<30;i++){ makeRock(-72+Math.random()*150, -46+Math.random()*22, 2.6+Math.random()*2.8); }
-// 西の山（logic x<118 → world x<-43）
-for(let i=0;i<20;i++){ makeRock(-74+Math.random()*30, -24+Math.random()*46, 2.2+Math.random()*2.4); }
-// 南西の川（logic y>478 & x<560 → world z>21,x<10）
-const river=new THREE.Mesh(new THREE.PlaneGeometry(72,18), new THREE.MeshToonMaterial({color:0x3f93c8,gradientMap:toonRamp,transparent:true,opacity:0.96}));
-river.rotation.x=-Math.PI/2; river.position.set(-24,0.03,29); worldGroup.add(river);
-for(let i=0;i<12;i++){ makeTree(-66+Math.random()*78, 24+Math.random()*16); }
-// 川沿い・縁の岩と森
-for(let a=Math.PI*0.15;a<Math.PI*1.05;a+=0.34){ makeRock(Math.cos(a)*66, Math.sin(a)*66*0.72, 1.1+Math.random()*1.2); }
-[[44,-22],[40,26],[52,4],[48,-8]].forEach(([x,z])=>makeTree(x,z));
+// 地形の見える化: 通行不可ゾーン(isTerrain=外周リング・東/南/北西の3開口)に岩(山)と川を配置
+for(let i=0;i<340;i++){ const x=10+Math.random()*940, y=10+Math.random()*580; if(!isTerrain(x,y)) continue;
+  const wx=toWX(x), wz=toWZ(y);
+  if(y<290) makeRock(wx,wz, 1.8+Math.random()*2.8);                 // 北側=山脈
+  else if(Math.random()<0.35) makeRock(wx,wz, 1.0+Math.random()*1.4); }
+// 川(水面): 南東・南西の外周アーク（南の開口は避ける）
+const riverMat=new THREE.MeshToonMaterial({color:0x3f93c8,gradientMap:toonRamp,transparent:true,opacity:0.96});
+for(const [ax,az,s] of [[34,30,30],[-30,30,30],[46,10,26],[-46,8,26]]){ const r=new THREE.Mesh(new THREE.PlaneGeometry(s,s),riverMat); r.rotation.x=-Math.PI/2; r.position.set(ax,0.03,az); worldGroup.add(r); }
+// 縁の森
+for(let i=0;i<18;i++){ const x=Math.random()*960,y=Math.random()*600; if(isTerrain(x,y)&&Math.random()<0.6) makeTree(toWX(x),toWZ(y)); }
 
 for(const k of ALL_DIRS){ const s=SPAWNS[k]; const g=new THREE.Group();
   const ring=new THREE.Mesh(new THREE.TorusGeometry(1.6,0.18,8,20), new THREE.MeshBasicMaterial({color:0xff5a5a}));

@@ -330,6 +330,14 @@ function teamRing(parent, mat){ const r=new THREE.Mesh(teamRingGeo, mat); r.rota
 const SHARED=new Set([PROJ_GEO,PART_GEO,BLOB_GEO,blobMat,OUTLINE_MAT,teamRingGeo,enemyRingMat,allyRingMat]);
 function disposeObject(root){ root.traverse(o=>{ if(o.geometry&&!SHARED.has(o.geometry)) o.geometry.dispose();
   const m=o.material; if(m){ (Array.isArray(m)?m:[m]).forEach(x=>{ if(!SHARED.has(x)) x.dispose(); }); } }); }
+// 飛行ユニットの翼（共有）＋浮遊高さ。高く浮かせ＋上から見える横長の翼で「飛行」を明示
+const FLY_Y=4.6;
+const WING_GEO=new THREE.PlaneGeometry(1,0.7), WING_MAT=new THREE.MeshBasicMaterial({color:0xeef4ff,transparent:true,opacity:0.95,side:THREE.DoubleSide});
+SHARED.add(WING_GEO); SHARED.add(WING_MAT);
+function addWings(g,h){ const wg=new THREE.Group(); wg.position.y=h*0.55; g.add(wg);
+  for(const s of [-1,1]){ const w=new THREE.Mesh(WING_GEO,WING_MAT); w.scale.set(h*1.2,h*0.95,1);
+    w.rotation.x=-Math.PI/2; w.position.set(s*h*0.62,0,0); wg.add(w); }
+  (g.userData.wings=g.userData.wings||[]).push(wg); }
 
 // ===== ワールド =========================================================
 const worldGroup=new THREE.Group(); scene.add(worldGroup);
@@ -387,7 +395,11 @@ function tagBody(g,body,col){ body.traverse(o=>{ if(o.material&&o.material.emiss
 
 function makeEnemyMesh(type){ const def=ENEMIES[type], h=ENEMY_H[type]||1.6;
   const g=makeCharMesh(ENEMY_MODEL[type]||'Skeleton_Warrior', h);
-  if(!def.flying){ groundBlob(g, Math.max(0.5,h*0.42)); const tr=teamRing(g, enemyRingMat); tr.scale.setScalar(Math.max(0.85,h*0.62)); }
+  if(def.flying){ // 飛行＝翼＋真下に大きい地上の影＋赤リング（高く浮いてるのが分かる）
+    addWings(g,h);
+    const sb=groundBlob(g, 1.3); sb.position.y=-FLY_Y+0.1;
+    const tr=teamRing(g, enemyRingMat); tr.position.y=-FLY_Y+0.11; tr.scale.setScalar(1.0);
+  } else { groundBlob(g, Math.max(0.5,h*0.42)); const tr=teamRing(g, enemyRingMat); tr.scale.setScalar(Math.max(0.85,h*0.62)); }
   scene.add(g); return g;
 }
 function makeFriendlyMesh(kind){ const h=ALLY_H[kind]||1.6;
@@ -747,7 +759,7 @@ function drawHpBars(){
   if(state===STATE.NIGHT||king.hp<king.maxHp) hpBar(toWX(king.x),3.5,toWZ(king.y),king.hp/king.maxHp,2.4);
   for(const n of nodes){ const b=n.building; if(b&&b.maxHp&&b.hp<b.maxHp) hpBar(toWX(b.x),3.6,toWZ(b.y),b.hp/b.maxHp,2.6); }
   for(const w of wallSlots){ if(w.built&&w.hp<w.maxHp) hpBar(toWX(w.x),2.1,toWZ(w.y),w.hp/w.maxHp,3.0); }
-  for(const e of enemies){ if(e.hp<e.maxHp) hpBar(toWX(e.x),(e.def.flying?4.7:1.9*e.baseScale),toWZ(e.y),e.hp/e.maxHp,1.3); }
+  for(const e of enemies){ if(e.hp<e.maxHp) hpBar(toWX(e.x),(e.def.flying?6.2:1.9*e.baseScale),toWZ(e.y),e.hp/e.maxHp,1.3); }
   for(const u of friendlies){ if(u.hp<u.maxHp) hpBar(toWX(u.x),2.0,toWZ(u.y),u.hp/u.maxHp,1.2); }
   for(let i=barUsed;i<barPool.length;i++) barPool[i].grp.visible=false;
 }
@@ -758,10 +770,11 @@ function syncScene(){
   daggerRing.material.opacity=king.flash>0?0.8:0;
   // 敵：攻撃の突き／出現ポップ／ヒット伸縮／歩き走りアニメ
   for(const e of enemies){ const m=e.mesh; if(!m) continue; const wx=toWX(e.x), wz=toWZ(e.y);
-    const baseY = e.def.flying ? 3.0+Math.sin(gameTime*3+e.bobOff)*0.3 : 0;
+    const baseY = e.def.flying ? FLY_Y+Math.sin(gameTime*2.5+e.bobOff)*0.35 : 0;
     let lunge=0; if(e.atkAnim>0){ const p=1-e.atkAnim/0.22; lunge=Math.sin(p*Math.PI)*0.4; }
     const fa=m.rotation.y; m.position.set(wx+Math.sin(fa)*lunge, baseY, wz+Math.cos(fa)*lunge);
     let sc=e.baseScale; if(e.spawnT>0) sc*=1-(e.spawnT/0.22)*0.6; if(e.flash>0) sc*=1+e.flash*0.5; m.scale.setScalar(sc);
+    if(m.userData.wings){ m.userData.wings[0].rotation.x=Math.sin(gameTime*15+e.bobOff)*0.42; }
     setCharWalk(m, e.moving); }
   // 味方
   for(const u of friendlies){ const m=u.mesh; if(!m) continue;

@@ -248,6 +248,13 @@ function flowDir(x,y){ const cx=Math.max(0,Math.min(G_W-1,Math.floor(x/G_C))), c
   let bx=0,by=0,bd=_dist[cy*G_W+cx];
   for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1],[1,1],[1,-1],[-1,1],[-1,-1]]){ const nx=cx+dx, ny=cy+dy; if(nx<0||ny<0||nx>=G_W||ny>=G_H) continue; const ni=ny*G_W+nx; if(!_pass[ni]) continue; if(_dist[ni]<bd){ bd=_dist[ni]; bx=dx; by=dy; } }
   if(bx===0&&by===0) return null; const l=Math.hypot(bx,by); return [bx/l,by/l]; }
+// 橋の床の高さ（橋を渡る区間だけ床の上に乗せる。端でランプ）
+const DECK_Y=0.34;
+function bridgeHeight(x,y){ const d=Math.hypot(x-480,y-300); if(d<MOAT_IN-16||d>MOAT_OUT+16) return 0;
+  const ang=Math.atan2(y-300,x-480);
+  for(const g of BRIDGES){ let a=Math.abs(ang-g); if(a>Math.PI)a=2*Math.PI-a; if(a<BRIDGE_W+0.04){
+    const edge=Math.min(d-(MOAT_IN-16),(MOAT_OUT+16)-d); return DECK_Y*Math.max(0,Math.min(1,edge/16)); } }
+  return 0; }
 
 let enemies=[], friendlies=[], projectiles=[], particles=[], spawnQueue=[];
 let nightTimer=0, selectedNode=null, selectedWall=null;
@@ -765,12 +772,12 @@ function drawHpBars(){
 }
 function syncScene(){
   // 王（Knightモデル・歩き/待機アニメ）
-  kingGroup.position.set(toWX(king.x),0,toWZ(king.y)); kingGroup.rotation.y=king.dir;
+  kingGroup.position.set(toWX(king.x),bridgeHeight(king.x,king.y),toWZ(king.y)); kingGroup.rotation.y=king.dir;
   kingGroup.visible=(state===STATE.NIGHT||state===STATE.DAY); setCharWalk(kingGroup, king.moving);
   daggerRing.material.opacity=king.flash>0?0.8:0;
   // 敵：攻撃の突き／出現ポップ／ヒット伸縮／歩き走りアニメ
   for(const e of enemies){ const m=e.mesh; if(!m) continue; const wx=toWX(e.x), wz=toWZ(e.y);
-    const baseY = e.def.flying ? FLY_Y+Math.sin(gameTime*2.5+e.bobOff)*0.35 : 0;
+    const baseY = e.def.flying ? FLY_Y+Math.sin(gameTime*2.5+e.bobOff)*0.35 : bridgeHeight(e.x,e.y);
     let lunge=0; if(e.atkAnim>0){ const p=1-e.atkAnim/0.22; lunge=Math.sin(p*Math.PI)*0.4; }
     const fa=m.rotation.y; m.position.set(wx+Math.sin(fa)*lunge, baseY, wz+Math.cos(fa)*lunge);
     let sc=e.baseScale; if(e.spawnT>0) sc*=1-(e.spawnT/0.22)*0.6; if(e.flash>0) sc*=1+e.flash*0.5; m.scale.setScalar(sc);
@@ -779,7 +786,7 @@ function syncScene(){
   // 味方
   for(const u of friendlies){ const m=u.mesh; if(!m) continue;
     let lunge=0; if(u.atkAnim>0){ const p=1-u.atkAnim/0.2; lunge=Math.sin(p*Math.PI)*0.35; }
-    m.rotation.y=u.dir; const fa=u.dir; m.position.set(toWX(u.x)+Math.sin(fa)*lunge, 0, toWZ(u.y)+Math.cos(fa)*lunge);
+    m.rotation.y=u.dir; const fa=u.dir; m.position.set(toWX(u.x)+Math.sin(fa)*lunge, bridgeHeight(u.x,u.y), toWZ(u.y)+Math.cos(fa)*lunge);
     let sc=u.baseScale; if(u.spawnT>0) sc*=1-(u.spawnT/0.22)*0.6; if(u.flash>0) sc*=1+u.flash*0.5; m.scale.setScalar(sc);
     setCharWalk(m, u.moving); }
   // ミルの羽／城の旗／水のゆらぎ
